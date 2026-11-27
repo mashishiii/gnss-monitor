@@ -189,8 +189,8 @@ private fun OsmMap(
 private fun OverlayBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier
-            .background(NavColors.OverlayBg, RoundedCornerShape(6.dp))
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(6.dp))
+            .background(NavColors.OverlayBg, RoundedCornerShape(10.dp))
+            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(10.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) { content() }
 }
@@ -203,7 +203,7 @@ private fun MapStatusBox(state: GnssUiState, modifier: Modifier = Modifier) {
         Row {
             Text(
                 fix.label,
-                color = if (fix == FixState.NO_FIX) NavColors.Warning else NavColors.UsedText,
+                color = if (fix == FixState.NO_FIX) NavColors.Warning else NavColors.TextPrimary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
             )

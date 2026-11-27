@@ -1,6 +1,9 @@
 package io.github.mashishiii.gnssmonitor.ui.theme
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,7 +45,7 @@ fun Modifier.glossy(shape: Shape, top: Color, bottom: Color, rim: Boolean = true
     val outline = shape.createOutline(size, layoutDirection, this)
     val body = Brush.verticalGradient(listOf(top, bottom))
     val gloss = Brush.verticalGradient(
-        listOf(Color.White.copy(alpha = 0.32f), Color.White.copy(alpha = 0.05f)),
+        listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.02f)),
         startY = 0f,
         endY = size.height / 2f,
     )
@@ -56,12 +59,12 @@ fun Modifier.glossy(shape: Shape, top: Color, bottom: Color, rim: Boolean = true
 }
 
 /** パネル（枠つきの面）。 */
-fun Modifier.panelSurface(shape: Shape = RoundedCornerShape(6.dp)): Modifier = drawWithCache {
+fun Modifier.panelSurface(shape: Shape = RoundedCornerShape(10.dp)): Modifier = drawWithCache {
     val outline = shape.createOutline(size, layoutDirection, this)
     val body = Brush.verticalGradient(listOf(NavColors.PanelTop, NavColors.PanelBottom))
     val border = NavColors.PanelBorder
     val stroke = Stroke(1.dp.toPx())
-    val lit = if (NavColors.isNight) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.9f)
+    val lit = if (NavColors.isNight) Color.White.copy(alpha = 0.05f) else Color.White.copy(alpha = 0.9f)
     onDrawBehind {
         drawOutline(outline, body)
         drawOutline(outline, border, style = stroke)
@@ -90,7 +93,7 @@ fun Modifier.insetBox(): Modifier = drawWithCache {
 fun Modifier.toolbarSurface(): Modifier = drawWithCache {
     val body = Brush.verticalGradient(listOf(NavColors.BarTop, NavColors.BarBottom))
     val gloss = Brush.verticalGradient(
-        listOf(Color.White.copy(alpha = 0.16f), Color.White.copy(alpha = 0.0f)),
+        listOf(Color.White.copy(alpha = 0.04f), Color.White.copy(alpha = 0.0f)),
         startY = 0f,
         endY = size.height / 2f,
     )
@@ -103,7 +106,8 @@ fun Modifier.toolbarSurface(): Modifier = drawWithCache {
 }
 
 /**
- * 大きめのタッチボタン。[on] は選択中（青く光る）。[tint] を渡すと、その色の光沢ボタン（記録停止の赤など）。
+ * 大きめのタッチボタン（nav-u 風に、控えめな濃いグレーの角丸）。[on] は選択中（えんじ色）。
+ * [tint] を渡すとその色（記録停止の赤など）。[enabled] が false なら薄く表示してタップを無視する。
  */
 @Composable
 fun NavButton(
@@ -113,14 +117,16 @@ fun NavButton(
     modifier: Modifier = Modifier,
     tint: Color? = null,
     fontSize: Int = 13,
+    enabled: Boolean = true,
+    horizontalPadding: Int = 12,
 ) {
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(10.dp)
     val top: Color
     val bottom: Color
     val textColor: Color
     when {
         tint != null -> {
-            top = lighten(tint, 0.25f); bottom = tint; textColor = Color.White
+            top = lighten(tint, 0.12f); bottom = tint; textColor = Color.White
         }
         on -> {
             top = NavColors.ButtonOnTop; bottom = NavColors.ButtonOnBottom; textColor = NavColors.OnButtonOn
@@ -137,11 +143,38 @@ fun NavButton(
         textAlign = TextAlign.Center,
         maxLines = 1,
         modifier = modifier
+            .alpha(if (enabled) 1f else 0.45f)
             .heightIn(min = 44.dp)
             .glossy(shape, top, bottom)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = horizontalPadding.dp, vertical = 11.dp),
     )
+}
+
+/** 「← 戻る」ボタン（nav-u の画面右下のボタンに倣う）。 */
+@Composable
+fun BackButton(enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier
+            .alpha(if (enabled) 1f else 0.45f)
+            .heightIn(min = 44.dp)
+            .glossy(shape, NavColors.ButtonTop, NavColors.ButtonBottom)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val c = NavColors.TextPrimary
+        Canvas(Modifier.size(14.dp)) {
+            val w = 2.dp.toPx()
+            val y = size.height / 2f
+            drawLine(c, Offset(size.width, y), Offset(1.dp.toPx(), y), w, StrokeCap.Round)
+            drawLine(c, Offset(1.dp.toPx(), y), Offset(size.width * 0.5f, y - size.height * 0.4f), w, StrokeCap.Round)
+            drawLine(c, Offset(1.dp.toPx(), y), Offset(size.width * 0.5f, y + size.height * 0.4f), w, StrokeCap.Round)
+        }
+        Text("戻る", color = NavColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+    }
 }
 
 fun lighten(c: Color, amount: Float): Color = Color(
@@ -179,7 +212,7 @@ fun GpsLamp(level: GpsLevel, modifier: Modifier = Modifier, size: Int = 14) {
     )
 }
 
-/** 画面上部のタイトル帯（青いグラデーション）。左に画面名、右に受信レベル。 */
+/** 画面上部のタイトル帯（nav-u のように、えんじ色の無地の帯に白い文字）。右に受信レベルのランプ。 */
 @Composable
 fun TitleBar(title: String, level: GpsLevel, modifier: Modifier = Modifier) {
     Row(
@@ -187,24 +220,17 @@ fun TitleBar(title: String, level: GpsLevel, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .drawWithCache {
                 val body = Brush.verticalGradient(listOf(NavColors.TitleTop, NavColors.TitleBottom))
-                val gloss = Brush.verticalGradient(
-                    listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f)),
-                    startY = 0f,
-                    endY = size.height / 2f,
-                )
                 onDrawBehind {
                     drawRect(body)
-                    clipRect(bottom = size.height / 2f) { drawRect(gloss) }
                     drawLine(Color.Black.copy(alpha = 0.5f), Offset(0f, size.height - 0.5.dp.toPx()), Offset(size.width, size.height - 0.5.dp.toPx()), 1.dp.toPx())
                 }
             }
-            .padding(horizontal = 12.dp, vertical = 3.dp),
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, color = NavColors.OnTitle, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = NavColors.OnTitle, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("GPS", color = NavColors.OnTitle.copy(alpha = 0.85f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
             GpsLamp(level)
             Text(level.label, color = NavColors.OnTitle, fontSize = 12.sp)
         }
@@ -213,3 +239,10 @@ fun TitleBar(title: String, level: GpsLevel, modifier: Modifier = Modifier) {
 
 /** 丸い円盤状の飾り（地図の方位マークなど）。 */
 fun Modifier.dial(): Modifier = glossy(CircleShape, NavColors.ButtonTop, NavColors.ButtonBottom)
+
+fun darken(c: Color, amount: Float): Color = Color(
+    red = c.red * (1f - amount),
+    green = c.green * (1f - amount),
+    blue = c.blue * (1f - amount),
+    alpha = c.alpha,
+)

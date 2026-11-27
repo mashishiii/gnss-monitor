@@ -111,3 +111,54 @@ fun gpsLevelFrom(fixState: FixState, capturedCount: Int): GpsLevel = when {
     capturedCount > 0 -> GpsLevel.ACQUIRING
     else -> GpsLevel.NONE
 }
+
+// ---------------------------------------------------------------- nav-u 風の表示形式
+
+/** 受信強度の 3 段階（nav-u の「GPS Level」凡例: 橙=強い 3 本 / 黄緑=中 2 本 / 灰=弱い 1 本）。 */
+enum class SignalLevel(val bars: Int, val label: String) {
+    STRONG(3, "強い"),
+    MEDIUM(2, "中"),
+    WEAK(1, "弱い"),
+}
+
+/** C/N0（dB-Hz）で強さを 3 段階に分ける。35 以上 = 強い、25 以上 = 中、それ未満 = 弱い。 */
+const val STRONG_CN0_DB_HZ = 35f
+const val MEDIUM_CN0_DB_HZ = 25f
+
+fun signalLevelFrom(cn0DbHz: Float): SignalLevel = when {
+    !cn0DbHz.isFinite() -> SignalLevel.WEAK
+    cn0DbHz >= STRONG_CN0_DB_HZ -> SignalLevel.STRONG
+    cn0DbHz >= MEDIUM_CN0_DB_HZ -> SignalLevel.MEDIUM
+    else -> SignalLevel.WEAK
+}
+
+/** 「N 35°37'19"」形式（nav-u の GPS 情報画面と同じ並び）。 */
+fun formatDmsNav(degrees: Double, positive: Char, negative: Char): String {
+    val totalSeconds = Math.round(Math.abs(degrees) * 3600.0)
+    val d = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val s = totalSeconds % 60
+    val hemi = if (degrees >= 0) positive else negative
+    return "$hemi $d°$m'$s\""
+}
+
+/** 「2011/ 6/10」形式（月と日は 2 桁幅で右寄せ）。 */
+fun formatDateNav(millis: Long, timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+    val c = java.util.Calendar.getInstance(timeZone).apply { timeInMillis = millis }
+    return String.format(
+        java.util.Locale.US, "%d/%2d/%2d",
+        c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH) + 1, c.get(java.util.Calendar.DAY_OF_MONTH),
+    )
+}
+
+/** 「2:03:03 PM」形式。 */
+fun formatTimeNav(millis: Long, timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()): String =
+    java.text.SimpleDateFormat("h:mm:ss a", java.util.Locale.US)
+        .apply { this.timeZone = timeZone }
+        .format(java.util.Date(millis))
+
+/** 速度（m/s → km/h、整数）。取得できないときは「---」。 */
+fun formatSpeedKmh(speedMps: Float?): String {
+    val v = speedMps?.takeIf { it.isFinite() && it >= 0f } ?: return "---"
+    return String.format(java.util.Locale.US, "%.0f km/h", v * 3.6f)
+}

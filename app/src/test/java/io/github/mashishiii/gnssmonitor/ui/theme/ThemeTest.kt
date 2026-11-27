@@ -60,9 +60,9 @@ class ThemeTest {
             "警告" to NavColors.Warning,
         )) {
             check("$tag $n on パネル", c, NavColors.PanelBottom, 4.5)
-            check("$tag $n on 値ボックス背景", c, NavColors.Background, 4.0)
+            check("$tag $n on 背景", c, NavColors.Background, 4.0)
         }
-        // スカイプロットの縁取り（文字盤の中央・縁どちらでも見えること）
+        // 受信強度バーの下の測位系の頭文字（背景に直接描く）と、球につける目印の文字
         for ((n, c) in listOf(
             "GPS" to NavColors.Gps,
             "みちびき" to NavColors.Qzss,
@@ -71,13 +71,20 @@ class ThemeTest {
             "BeiDou" to NavColors.BeiDou,
             "その他" to NavColors.OtherConstellation,
         )) {
-            check("$tag $n on 文字盤中央", c, NavColors.DialCenter, 3.0)
-            check("$tag $n on 文字盤縁", c, NavColors.DialEdge, 3.0)
+            check("$tag $n の頭文字 on 背景", c, NavColors.Background, 3.5)
+            val badgeText = if (night) Color(0xFF111114) else Color.White
+            check("$tag $n の目印の文字", badgeText, c, 3.5)
         }
-        // マーカーの白い番号が塗りの上で読めること
-        for ((n, c) in listOf("使用" to NavColors.Used, "受信" to NavColors.Received, "弱い" to NavColors.Weak)) {
-            check("$tag マーカー $n の番号", Color.White, c, 4.0)
+        // 球の中の SVID（暗い文字）が、強さ 3 段階のどの色の上でも読めること
+        for ((n, c) in listOf("強い" to NavColors.LevelStrong, "中" to NavColors.LevelMedium, "弱い" to NavColors.LevelWeak)) {
+            check("$tag 球 $n の番号", NavColors.OnSphere, c, 6.0)
         }
+        // 球と文字盤の見分け（球には濃い縁取りと陰影があるので、中央の部分で確認）
+        for ((n, c) in listOf("強い" to NavColors.LevelStrong, "中" to NavColors.LevelMedium, "弱い" to NavColors.LevelWeak)) {
+            check("$tag 球 $n on 文字盤中央", c, NavColors.DialCenter, 2.0)
+        }
+        // 文字盤の上の「N」
+        check("$tag N on 背景", NavColors.TextPrimary, NavColors.Background, 6.5)
     }
 
     @Test
@@ -96,7 +103,54 @@ class ThemeTest {
         assertTrue("昼夜で背景色が違うこと", dayBg != NavColors.Background)
         // 昼は明るく、夜は暗い
         assertTrue(luminance(dayBg) > 0.6)
-        assertTrue(luminance(NavColors.Background) < 0.05)
+        assertTrue(luminance(NavColors.Background) < 0.02)
+    }
+
+    @Test
+    fun titleBarIsMaroonInBothModes() {
+        // nav-u の画面と同じ、えんじ色のタイトル帯（赤みが強く、青みが少ない暗い色）。昼夜で共通
+        for (night in listOf(true, false)) {
+            NavColors.use(night)
+            for (c in listOf(NavColors.TitleTop, NavColors.TitleBottom)) {
+                assertTrue("赤が優勢", c.red > c.green * 2.5f && c.red > c.blue * 1.8f)
+                assertTrue("暗い色", luminance(c) < 0.06)
+            }
+        }
+    }
+
+    @Test
+    fun noBluePrimaryButtonsLeft() {
+        // v0.4.0 の青い光沢ボタンはやめた（選択中はえんじ色、通常は無彩色に近い濃いグレー）
+        for (night in listOf(true, false)) {
+            NavColors.use(night)
+            for (c in listOf(NavColors.ButtonOnTop, NavColors.ButtonOnBottom)) assertTrue("選択ボタンは青くない", c.blue < c.red)
+            for (c in listOf(NavColors.ButtonTop, NavColors.ButtonBottom)) {
+                assertTrue("通常ボタンはほぼ無彩色", maxOf(c.red, c.green, c.blue) - minOf(c.red, c.green, c.blue) < 0.06f)
+            }
+        }
+    }
+
+    @Test
+    fun dialIsPurpleGradientDarkCenterInNight() {
+        NavColors.use(true)
+        val c = NavColors.DialCenter
+        val e = NavColors.DialEdge
+        assertTrue("中心は暗い", luminance(c) < 0.02)
+        assertTrue("縁は紫（赤と青が緑より強い）", e.blue > e.green * 1.5f && e.red > e.green * 1.3f)
+        assertTrue("縁のほうが明るい", luminance(e) > luminance(c))
+    }
+
+    @Test
+    fun levelColorsFollowNavULegend() {
+        for (night in listOf(true, false)) {
+            NavColors.use(night)
+            val s = NavColors.LevelStrong
+            val m = NavColors.LevelMedium
+            val w = NavColors.LevelWeak
+            assertTrue("強い=橙", s.red > 0.8f && s.green in 0.4f..0.65f && s.blue < 0.3f)
+            assertTrue("中=黄緑（赤と緑が強く青が弱い）", m.red > 0.55f && m.green > 0.6f && m.blue < 0.3f)
+            assertTrue("弱い=灰（ほぼ無彩色）", maxOf(w.red, w.green, w.blue) - minOf(w.red, w.green, w.blue) < 0.08f)
+        }
     }
 
     @Test

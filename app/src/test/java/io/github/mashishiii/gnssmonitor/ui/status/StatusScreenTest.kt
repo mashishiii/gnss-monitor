@@ -21,6 +21,7 @@ import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -64,7 +65,7 @@ class StatusScreenTest {
     @Test
     fun rendersPortraitPhone() {
         render(360.dp, 700.dp, fixState)
-        composeRule.onNodeWithText("3D 測位").assertExists()
+        composeRule.onNodeWithText("3D").assertExists()
         composeRule.onNodeWithText("5 / 6").assertExists()
         composeRule.onNodeWithText("±4.2 m").assertExists()
     }
@@ -88,7 +89,45 @@ class StatusScreenTest {
         composeRule.onNodeWithText("未測位").assertExists()
         composeRule.onNodeWithText("0 / 0").assertExists()
         composeRule.onNodeWithText("緯度").assertExists()
-        assertEquals(listOf("---", "---", "---", "---", "---"), infoRows(null, false).map { it.second })
+        val rows = statusRows(GnssUiState(position = null, satellites = emptyList()))
+        // 日付・時刻・緯度・経度・速度・高度は「---」、測位は未測位、衛星 0 / 0、精度は「---」
+        assertEquals(listOf("---", "---", "---", "---", "---", "---", "未測位", "0 / 0", "---"), rows.map { it.second })
+        composeRule.onNodeWithText("速度").assertExists()
+    }
+
+    @Test
+    fun infoPanelShowsNavUStyleRowsAndSpeed() {
+        val moving = fixState.copy(
+            position = PositionInfo(35.6586, 139.7454, 4.2f, 42.0, 1795744748000L, speedMps = 8.4f, bearingDegrees = 62f),
+        )
+        render(360.dp, 700.dp, moving)
+        composeRule.onNodeWithText("速度").assertExists()
+        composeRule.onNodeWithText("30 km/h").assertExists()
+        composeRule.onNodeWithText("GPS Level").assertExists()
+        val labels = statusRows(moving).map { it.first }
+        assertEquals(listOf("日付", "時刻", "緯度", "経度", "速度", "高度", "測位", "衛星", "精度"), labels)
+        assertEquals("N 35°39'31\"", statusRows(moving)[2].second)
+    }
+
+    @Test
+    fun speedIsDashWithoutSpeedOrFix() {
+        // 速度が取れていない（Location に speed なし）
+        assertEquals("---", statusRows(fixState).first { it.first == "速度" }.second)
+        // 測位前は、速度があっても出さない
+        val noFix = GnssUiState(position = PositionInfo(35.0, 139.0, 5f, 1.0, 1795744748000L, speedMps = 5f), satellites = emptyList())
+        assertEquals("---", statusRows(noFix).first { it.first == "速度" }.second)
+    }
+
+    @Test
+    fun wideLayoutShowsLevelPanelSkyAndInfoSideBySide() {
+        render(840.dp, 560.dp, fixState)
+        composeRule.onNodeWithTag(TAG_LEVEL_PANEL).assertExists()
+        composeRule.onNodeWithTag(TAG_SKY_PLOT).assertExists()
+        composeRule.onNodeWithTag(TAG_INFO_PANEL).assertExists()
+        val level = composeRule.onNodeWithTag(TAG_LEVEL_PANEL).fetchSemanticsNode().positionInRoot.x
+        val sky = composeRule.onNodeWithTag(TAG_SKY_PLOT).fetchSemanticsNode().positionInRoot.x
+        val info = composeRule.onNodeWithTag(TAG_INFO_PANEL).fetchSemanticsNode().positionInRoot.x
+        assertTrue("左から 凡例 → スカイプロット → 情報", level < sky && sky < info)
     }
 
     @Test

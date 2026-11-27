@@ -35,12 +35,21 @@ class DisplayModeUiTest {
     @Test
     fun titleBarShowsScreenNameAndGpsLevel() {
         rule.setContent { AppContent(state, TrackRecorder.State(), initialMode = DisplayMode.NIGHT) }
-        rule.onNodeWithText("GPS情報（測位状況）").assertIsDisplayed()
+        rule.onNodeWithText("測位情報").assertIsDisplayed()
         rule.onNodeWithText("測位中").assertIsDisplayed()
         rule.onNodeWithTag("nav-LIST").performClick()
-        rule.onNodeWithText("GPS情報（衛星一覧）").assertIsDisplayed()
+        rule.onNodeWithText("衛星情報").assertIsDisplayed()
         rule.onNodeWithTag("nav-MAP").performClick()
         rule.onNodeWithText("現在地マップ").assertIsDisplayed()
+    }
+
+    @Test
+    fun backButtonReturnsToStatus() {
+        rule.setContent { AppContent(state, TrackRecorder.State(), initialMode = DisplayMode.NIGHT) }
+        rule.onNodeWithTag("nav-MAP").performClick()
+        rule.onNodeWithText("現在地マップ").assertIsDisplayed()
+        rule.onNodeWithTag("nav-BACK").performClick()
+        rule.onNodeWithText("測位情報").assertIsDisplayed()
     }
 
     @Test

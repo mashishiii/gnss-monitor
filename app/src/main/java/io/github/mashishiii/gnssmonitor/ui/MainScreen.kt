@@ -25,6 +25,8 @@ import io.github.mashishiii.gnssmonitor.data.gpsLevelFrom
 import io.github.mashishiii.gnssmonitor.ui.theme.DisplayMode
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
 import io.github.mashishiii.gnssmonitor.ui.theme.NavButton
+import io.github.mashishiii.gnssmonitor.ui.theme.BackButton
+import androidx.activity.compose.BackHandler
 import io.github.mashishiii.gnssmonitor.ui.theme.TitleBar
 import io.github.mashishiii.gnssmonitor.ui.theme.toolbarSurface
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,8 +86,8 @@ import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 
 /** 下のボタンで切り替える画面。 */
 enum class AppScreen(val label: String, val title: String) {
-    STATUS("測位状況", "GPS情報（測位状況）"),
-    LIST("衛星一覧", "GPS情報（衛星一覧）"),
+    STATUS("測位状況", "測位情報"),
+    LIST("衛星一覧", "衛星情報"),
     MAP("地図", "現在地マップ"),
 }
 
@@ -217,6 +219,9 @@ private fun AppScaffold(
         if (uri != null) scope.launch { exportTrack(context, uri, track.points, ExportFormat.GPX, fileBase) }
     }
 
+    // 測位状況以外では、戻る操作で測位状況に戻る（測位状況では通常どおりアプリを閉じる）
+    BackHandler(enabled = screen != AppScreen.STATUS) { screen = AppScreen.STATUS }
+
     Scaffold(
         containerColor = NavColors.Background,
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -227,7 +232,9 @@ private fun AppScaffold(
                 Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
             )
         },
-        bottomBar = { BottomNav(screen, mode, onSelect = { screen = it }, onMode = onMode) },
+        bottomBar = {
+            BottomNav(screen, mode, onSelect = { screen = it }, onMode = onMode, onBack = { screen = AppScreen.STATUS })
+        },
     ) { innerPadding ->
         // 下のボタンや画面端（ナビゲーションバー・カメラ穴）と重ならないよう、ここで余白を確保する
         Box(
@@ -287,13 +294,14 @@ private suspend fun exportTrack(
     ).show()
 }
 
-/** nav-u のような下部ツールバー。画面切り替えの大きな光沢ボタンと、右端の昼夜切り替え（表示切替）。 */
+/** nav-u のような下部ツールバー。画面切り替えの大きなボタン、昼夜切り替え（表示）、右端に「← 戻る」。 */
 @Composable
 private fun BottomNav(
     current: AppScreen,
     mode: DisplayMode,
     onSelect: (AppScreen) -> Unit,
     onMode: (DisplayMode) -> Unit,
+    onBack: () -> Unit,
 ) {
     Row(
         Modifier
@@ -310,14 +318,22 @@ private fun BottomNav(
                 on = item == current,
                 onClick = { onSelect(item) },
                 modifier = Modifier.weight(1f).testTag("nav-${item.name}"),
+                fontSize = 12,
+                horizontalPadding = 4,
             )
         }
         NavButton(
             "表示 ${mode.label}",
             on = false,
             onClick = { onMode(mode.next()) },
-            modifier = Modifier.weight(0.8f).testTag("nav-DISPLAY"),
-            fontSize = 12,
+            modifier = Modifier.weight(1.05f).testTag("nav-DISPLAY"),
+            fontSize = 11,
+            horizontalPadding = 4,
+        )
+        BackButton(
+            enabled = current != AppScreen.STATUS,
+            onClick = onBack,
+            modifier = Modifier.weight(0.85f).testTag("nav-BACK"),
         )
     }
 }

@@ -36,7 +36,6 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextMeasurer
@@ -51,29 +50,36 @@ import androidx.compose.ui.unit.sp
 import io.github.mashishiii.gnssmonitor.data.FixState
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.MAX_CN0_DB_HZ
-import io.github.mashishiii.gnssmonitor.data.MarkerShape
 import io.github.mashishiii.gnssmonitor.data.MergedSatellite
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
-import io.github.mashishiii.gnssmonitor.data.SignalClass
-import io.github.mashishiii.gnssmonitor.data.formatDateJa
-import io.github.mashishiii.gnssmonitor.data.formatDms
-import io.github.mashishiii.gnssmonitor.data.formatTimeJa
+import io.github.mashishiii.gnssmonitor.data.SignalLevel
+import io.github.mashishiii.gnssmonitor.data.signalLevelFrom
+import io.github.mashishiii.gnssmonitor.data.formatDateNav
+import io.github.mashishiii.gnssmonitor.data.formatDmsNav
+import io.github.mashishiii.gnssmonitor.data.formatSpeedKmh
+import io.github.mashishiii.gnssmonitor.data.formatTimeNav
+import io.github.mashishiii.gnssmonitor.ui.theme.darken
 import io.github.mashishiii.gnssmonitor.data.mergeSatellites
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import io.github.mashishiii.gnssmonitor.ui.theme.constellationColor
-import io.github.mashishiii.gnssmonitor.ui.theme.insetBox
 import io.github.mashishiii.gnssmonitor.ui.theme.lighten
 import io.github.mashishiii.gnssmonitor.ui.theme.panelSurface
 import androidx.compose.ui.graphics.Brush
 import java.util.Locale
 
-/** この幅（dp）以上なら、スカイプロットと受信強度を横並びにする。折りたたみ展開時や横向き用。 */
+/** この幅（dp）以上なら、スカイプロットと情報パネルを横並びにする。折りたたみ展開時や横向き用。 */
 private val WideThreshold = 600.dp
 
 internal const val TAG_SKY_PLOT = "skyPlot"
 internal const val TAG_SIGNAL_BARS = "signalBars"
+internal const val TAG_LEVEL_PANEL = "levelPanel"
+internal const val TAG_INFO_PANEL = "infoPanel"
 
-/** 測位状況画面（既定の画面）。 */
+/** 左の「GPS Level」パネルの幅（縦長・横長とも）。 */
+private val LevelPanelWidthNarrow = 96.dp
+private val LevelPanelWidthWide = 132.dp
+
+/** 測位状況画面（既定の画面）。nav-u の「測位情報」画面に倣い、左に凡例、中央にスカイプロット、右に情報パネル。 */
 @Composable
 fun StatusScreen(
     state: GnssUiState,
@@ -84,24 +90,21 @@ fun StatusScreen(
     val sats = remember(state.satellites) { mergeSatellites(state.satellites) }
     val selected = sats.firstOrNull { it.key == selectedKey }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        FixStrip(state, Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
-        BoxWithConstraints(Modifier.fillMaxWidth().weight(1f, fill = true)) {
-            if (maxWidth >= WideThreshold) {
-                WideLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
-            } else {
-                NarrowLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
-            }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        if (maxWidth >= WideThreshold) {
+            WideLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
+        } else {
+            NarrowLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
         }
     }
 }
 
 /**
- * 縦長画面でスカイプロット以外（凡例・詳細・強度バー・情報ボックス）に必要な高さの目安。
+ * 縦長画面でスカイプロット以外（詳細・強度バー・情報パネル）に必要な高さの目安。
  * 残りが [NarrowMinSky] 以上あれば、スクロールなしで全部が見えるようにスカイプロットを縮める。
  */
-private val NarrowReservedHeight = 354.dp
-private val NarrowMinSky = 180.dp
+private val NarrowReservedHeight = 344.dp
+private val NarrowMinSky = 200.dp
 
 /** スクロールなしで収める配置にできるか。 */
 internal fun narrowFitsWithoutScroll(maxHeight: Dp): Boolean = maxHeight - NarrowReservedHeight >= NarrowMinSky
@@ -116,33 +119,43 @@ private fun NarrowLayout(
     maxHeight: Dp,
 ) {
     if (narrowFitsWithoutScroll(maxHeight)) {
-        // スカイプロットが残りの高さを使う（下のボタンと重ならず、凡例・高度まで一画面に収まる）
-        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                SkyPlot(
-                    sats, selected?.key, onSelect,
-                    Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true).testTag(TAG_SKY_PLOT),
-                )
+        // スカイプロットが残りの高さを使う（下のボタンと重ならず、情報パネルの最後の行まで一画面に収まる）
+        Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LevelPanel(Modifier.width(LevelPanelWidthNarrow).fillMaxHeight())
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    SkyPlot(
+                        sats, selected?.key, onSelect,
+                        Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true).testTag(TAG_SKY_PLOT),
+                    )
+                }
             }
-            SkyLegend()
-            Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            Readout(selected)
             SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
-            InfoRows(state, Modifier.padding(top = 4.dp))
+            InfoPanel(state, twoColumns = true)
         }
     } else {
         // 高さが足りない（横向きのスマホなど）ときはスクロール
         Column(
-            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally,
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            SkyPlot(sats, selected?.key, onSelect, Modifier.size(minOf(maxWidth, 320.dp)).testTag(TAG_SKY_PLOT))
-            SkyLegend()
-            Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            val sky = minOf(maxWidth - LevelPanelWidthNarrow - 28.dp, 320.dp)
+            Row(Modifier.fillMaxWidth().height(sky), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LevelPanel(Modifier.width(LevelPanelWidthNarrow).fillMaxHeight())
+                Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                    SkyPlot(sats, selected?.key, onSelect, Modifier.size(sky).testTag(TAG_SKY_PLOT))
+                }
+            }
+            Readout(selected)
             SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
-            InfoRows(state, Modifier.padding(top = 4.dp))
+            InfoPanel(state, twoColumns = true)
         }
     }
 }
+
+/** 広い画面で、受信強度バーと詳細に確保する高さの目安。 */
+private val WideBottomHeight = 166.dp
 
 @Composable
 private fun WideLayout(
@@ -153,99 +166,124 @@ private fun WideLayout(
     maxWidth: Dp,
     maxHeight: Dp,
 ) {
-    // 横向きのスマホのように高さが足りないときは、スカイプロットを高さに合わせて小さくする
-    val skySize = minOf(maxWidth * 0.46f, maxOf(220.dp, maxHeight - 8.dp))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Column(
-            Modifier.width(skySize).verticalScroll(rememberScrollState()),
+    val topHeight = maxHeight - WideBottomHeight - 16.dp
+    val fits = topHeight >= 230.dp
+    val skySize = if (fits) minOf(topHeight, maxWidth - LevelPanelWidthWide - 250.dp) else 260.dp
+    val body: @Composable () -> Unit = {
+        Row(
+            Modifier.fillMaxWidth().then(if (fits) Modifier.height(topHeight) else Modifier.height(skySize)),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SkyPlot(sats, selected?.key, onSelect, Modifier.size(skySize).testTag(TAG_SKY_PLOT))
-            SkyLegend()
+            LevelPanel(Modifier.width(LevelPanelWidthWide).fillMaxHeight(), large = true)
+            Box(Modifier.width(skySize).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                SkyPlot(sats, selected?.key, onSelect, Modifier.size(skySize).testTag(TAG_SKY_PLOT))
+            }
+            InfoPanel(state, twoColumns = false, modifier = Modifier.weight(1f).fillMaxHeight())
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Readout(selected, Modifier.padding(end = 8.dp, bottom = 6.dp))
-            SignalBars(sats, selected?.key, onSelect, Modifier.padding(end = 8.dp))
-            InfoRows(state, Modifier.padding(top = 8.dp, end = 8.dp))
-        }
+        Readout(selected)
+        SignalBars(sats, selected?.key, onSelect, barHeight = 90.dp)
+    }
+    if (fits) {
+        Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { body() }
+    } else {
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) { body() }
     }
 }
 
-// ---------------------------------------------------------------- 上部の帯
+// ---------------------------------------------------------------- 凡例パネル（GPS Level）
 
-@Composable
-private fun FixStrip(state: GnssUiState, modifier: Modifier = Modifier) {
-    val fix = state.fixState
-    val hasFix = fix != FixState.NO_FIX
-    val accuracy = state.position?.accuracyMeters?.takeIf { hasFix }
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        StripCell(
-            "測位状態",
-            if (hasFix) "${fix.label} 測位" else fix.label,
-            if (hasFix) NavColors.UsedText else NavColors.Warning,
-            Modifier.weight(1f),
-        )
-        StripCell("使用 / 捕捉", "${state.usedCount} / ${state.capturedCount}", NavColors.TextPrimary, Modifier.weight(1f))
-        StripCell(
-            "水平精度",
-            accuracy?.let { String.format(Locale.US, "±%.1f m", it) } ?: "---",
-            NavColors.TextPrimary,
-            Modifier.weight(1f),
-        )
-    }
+private fun levelColor(level: SignalLevel): Color = when (level) {
+    SignalLevel.STRONG -> NavColors.LevelStrong
+    SignalLevel.MEDIUM -> NavColors.LevelMedium
+    SignalLevel.WEAK -> NavColors.LevelWeak
+}
+
+/** 光沢のある 3D の球。 */
+private fun DrawScope.drawSphere(center: Offset, r: Float, base: Color, alpha: Float = 1f) {
+    val brush = Brush.radialGradient(
+        listOf(lighten(base, 0.7f), base, darken(base, 0.5f)),
+        center = Offset(center.x - r * 0.35f, center.y - r * 0.4f),
+        radius = r * 1.55f,
+    )
+    drawCircle(brush, r, center, alpha = alpha)
+    drawCircle(Color.Black.copy(alpha = 0.35f), r, center, alpha = alpha, style = Stroke(0.8f))
+    drawCircle(Color.White.copy(alpha = 0.55f), r * 0.17f, Offset(center.x - r * 0.38f, center.y - r * 0.42f), alpha = alpha)
+}
+
+/** 測位系の小さな丸い目印（頭文字つき）。 */
+private fun DrawScope.drawBadge(measurer: TextMeasurer, letter: String, center: Offset, r: Float, color: Color, alpha: Float = 1f) {
+    drawCircle(color, r, center, alpha = alpha)
+    drawCircle(Color.Black.copy(alpha = 0.55f), r, center, alpha = alpha, style = Stroke(0.8f))
+    val textColor = if (NavColors.isNight) Color(0xFF111114) else Color.White
+    drawCentered(
+        measurer, letter, center,
+        TextStyle(color = textColor, fontSize = (r * 1.15f / density).sp, fontWeight = FontWeight.Bold),
+    )
 }
 
 @Composable
-private fun StripCell(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
+private fun LevelRow(level: SignalLevel, label: String, large: Boolean) {
+    Row(Modifier.height(if (large) 24.dp else 15.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Canvas(Modifier.size(if (large) 20.dp else 15.dp)) {
+            drawSphere(Offset(size.width / 2f, size.height / 2f), size.minDimension / 2f - 1f, levelColor(level))
+        }
+        // 電波の強さの棒（強い=3 本、中=2 本、弱い=1 本）
+        Canvas(Modifier.size(width = if (large) 20.dp else 15.dp, height = if (large) 16.dp else 12.dp)) {
+            val w = size.width / 5f
+            for (i in 0 until 3) {
+                val h = size.height * (0.45f + 0.275f * i)
+                drawRect(
+                    if (i < level.bars) NavColors.TextPrimary else NavColors.TextPrimary.copy(alpha = 0.18f),
+                    Offset(i * 2f * w, size.height - h), androidx.compose.ui.geometry.Size(w * 1.4f, h),
+                )
+            }
+        }
+        Text(label, color = NavColors.TextSecondary, fontSize = if (large) 11.sp else 9.sp, lineHeight = if (large) 13.sp else 11.sp, maxLines = 1)
+    }
+}
+
+/** 左の凡例パネル。上は nav-u の「GPS Level」（球の色 = 強さ）、下は測位系の目印（頭文字つきの丸）。 */
+@Composable
+private fun LevelPanel(modifier: Modifier = Modifier, large: Boolean = false) {
+    val measurer = rememberTextMeasurer()
     Column(
         modifier
-            .panelSurface(RoundedCornerShape(6.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .testTag(TAG_LEVEL_PANEL)
+            .panelSurface(RoundedCornerShape(10.dp))
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(label, color = NavColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
-        Text(value, color = valueColor, fontFamily = FontFamily.Monospace, fontSize = 15.sp, maxLines = 1)
+        Column(verticalArrangement = Arrangement.spacedBy(if (large) 8.dp else 2.dp)) {
+            Text("GPS Level", color = NavColors.TextPrimary, fontSize = if (large) 14.sp else 11.sp, lineHeight = if (large) 17.sp else 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            LevelRow(SignalLevel.STRONG, "強い", large)
+            LevelRow(SignalLevel.MEDIUM, "中", large)
+            LevelRow(SignalLevel.WEAK, "弱い", large)
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(if (large) 5.dp else 2.dp)) {
+            val items = listOf(
+                Triple("G", "GPS", NavColors.Gps),
+                Triple("J", "みちびき", NavColors.Qzss),
+                Triple("R", "GLONASS", NavColors.Glonass),
+                Triple("E", "Galileo", NavColors.Galileo),
+                Triple("C", "BeiDou", NavColors.BeiDou),
+            )
+            for ((letter, name, color) in items) {
+                Row(Modifier.height(if (large) 18.dp else 13.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Canvas(Modifier.size(if (large) 16.dp else 12.dp)) {
+                        drawBadge(measurer, letter, Offset(size.width / 2f, size.height / 2f), size.minDimension / 2f, color)
+                    }
+                    Text(name, color = NavColors.TextSecondary, fontSize = if (large) 11.sp else 9.sp, lineHeight = if (large) 13.sp else 11.sp, maxLines = 1)
+                }
+            }
+            Text("うすい球＝未使用", color = NavColors.TextSecondary, fontSize = if (large) 10.sp else 8.sp, lineHeight = if (large) 12.sp else 10.sp, maxLines = 1)
+        }
     }
 }
 
 // ---------------------------------------------------------------- スカイプロット
-
-private fun markerFill(sat: MergedSatellite): Color = when (sat.signalClass) {
-    SignalClass.USED -> NavColors.Used
-    SignalClass.RECEIVED -> NavColors.Received
-    SignalClass.WEAK -> NavColors.Weak
-}
-
-private fun DrawScope.drawMarker(
-    shape: MarkerShape,
-    center: Offset,
-    r: Float,
-    fill: Color,
-    stroke: Color,
-    strokeWidth: Float,
-) {
-    val vertices = markerVertices(shape, r)
-    if (vertices == null) {
-        drawCircle(fill, r, center)
-        if (fill.alpha > 0.5f) {
-            // 光沢（上側に明るい楕円）
-            drawCircle(Color.White.copy(alpha = 0.22f), r * 0.62f, Offset(center.x, center.y - r * 0.38f))
-        }
-        drawCircle(stroke, r, center, style = Stroke(strokeWidth))
-    } else {
-        val path = Path().apply {
-            vertices.forEachIndexed { i, v ->
-                if (i == 0) moveTo(center.x + v.x, center.y + v.y) else lineTo(center.x + v.x, center.y + v.y)
-            }
-            close()
-        }
-        drawPath(path, fill)
-        if (fill.alpha > 0.5f) {
-            clipPath(path) {
-                drawRect(Color.White.copy(alpha = 0.18f), Offset(center.x - r, center.y - r), androidx.compose.ui.geometry.Size(2 * r, r * 0.9f))
-            }
-        }
-        drawPath(path, stroke, style = Stroke(strokeWidth))
-    }
-}
 
 private fun DrawScope.drawCentered(
     measurer: TextMeasurer,
@@ -284,100 +322,47 @@ internal fun SkyPlot(
         val layout = skyLayout(size.width, size.height, 18.dp.toPx())
         val center = Offset(layout.cx, layout.cy)
         val r = layout.radius
-        val labelStyle = TextStyle(color = NavColors.TextSecondary, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
 
-        // 文字盤: 中央が明るく縁が暗い放射グラデーションに、金属風のベゼル（上が明るく下が暗い二重の縁）
+        // 文字盤: 中心が暗く縁が紫の放射グラデーション、細い白い外周、仰角リング 2 本、白い十字線
         drawCircle(
             Brush.radialGradient(listOf(NavColors.DialCenter, NavColors.DialEdge), center = center, radius = r),
             r, center,
         )
-        drawCircle(
-            Brush.verticalGradient(listOf(NavColors.BezelLight, NavColors.BezelDark), startY = center.y - r, endY = center.y + r),
-            r + 3.dp.toPx(), center, style = Stroke(4.dp.toPx()),
-        )
-        drawCircle(Color.Black.copy(alpha = if (NavColors.isNight) 0.55f else 0.25f), r - 0.5.dp.toPx(), center, style = Stroke(1.dp.toPx()))
-        drawCircle(NavColors.GridLine, elevationRingRadius(30f, layout), center, style = Stroke(1.dp.toPx()))
-        drawCircle(NavColors.GridLine, elevationRingRadius(60f, layout), center, style = Stroke(1.dp.toPx()))
-        drawLine(NavColors.GridLine, Offset(center.x - r, center.y), Offset(center.x + r, center.y), 1.dp.toPx())
-        drawLine(NavColors.GridLine, Offset(center.x, center.y - r), Offset(center.x, center.y + r), 1.dp.toPx())
-        drawText(
-            measurer.measure("60°", labelStyle),
-            topLeft = Offset(center.x + 3.dp.toPx(), center.y - elevationRingRadius(60f, layout) - 11.dp.toPx()),
-        )
-        drawText(
-            measurer.measure("30°", labelStyle),
-            topLeft = Offset(center.x + 3.dp.toPx(), center.y - elevationRingRadius(30f, layout) - 11.dp.toPx()),
+        drawCircle(NavColors.DialRing, elevationRingRadius(30f, layout), center, style = Stroke(1.dp.toPx()))
+        drawCircle(NavColors.DialRing, elevationRingRadius(60f, layout), center, style = Stroke(1.dp.toPx()))
+        drawLine(NavColors.DialLine, Offset(center.x - r, center.y), Offset(center.x + r, center.y), 1.dp.toPx())
+        drawLine(NavColors.DialLine, Offset(center.x, center.y - r), Offset(center.x, center.y + r), 1.dp.toPx())
+        drawCircle(NavColors.DialLine, r, center, style = Stroke(1.5.dp.toPx()))
+
+        // 方位は上の「N」だけ（nav-u と同じ。北が上）
+        drawCentered(
+            measurer, "N", Offset(center.x, center.y - r - 9.dp.toPx()),
+            TextStyle(color = NavColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold),
         )
 
-        // 方位ラベル（N が上）
-        val dirStyle = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold)
-        val off = r + 10.dp.toPx()
-        drawCentered(measurer, "N", Offset(center.x, center.y - off), dirStyle.copy(color = NavColors.TextPrimary))
-        drawCentered(measurer, "E", Offset(center.x + off, center.y), dirStyle.copy(color = NavColors.TextSecondary))
-        drawCentered(measurer, "S", Offset(center.x, center.y + off), dirStyle.copy(color = NavColors.TextSecondary))
-        drawCentered(measurer, "W", Offset(center.x - off, center.y), dirStyle.copy(color = NavColors.TextSecondary))
-
-        val markerR = 10.dp.toPx()
-        val svidStyle = TextStyle(color = Color.White, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-        // 選択中のマーカーは最後（最前面）に描く
+        val markerR = 11.dp.toPx()
+        val svidStyle = TextStyle(color = NavColors.OnSphere, fontWeight = FontWeight.Bold)
+        // 選択中の球は最後（最前面）に描く
         val ordered = sats.sortedBy { it.key == selectedKey }
         for (sat in ordered) {
             val p = skyPosition(sat.azimuthDegrees, sat.elevationDegrees, layout)
             val c = Offset(p.x, p.y)
+            val alpha = if (sat.usedInFix) 1f else 0.5f
             if (sat.key == selectedKey) {
                 drawCircle(
-                    Color.White, markerR + 8.dp.toPx(), c,
+                    NavColors.TextPrimary, markerR + 7.dp.toPx(), c,
                     style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))),
                 )
             }
-            drawMarker(sat.markerShape, c, markerR, markerFill(sat), constellationColor(sat.constellationType), 2.dp.toPx())
+            drawSphere(c, markerR, levelColor(signalLevelFrom(sat.cn0DbHz)), alpha)
             drawCentered(
-                measurer, sat.svid.toString(),
-                Offset(c.x, c.y + if (sat.markerShape == MarkerShape.TRIANGLE) 2.dp.toPx() else 0f),
-                svidStyle.copy(fontSize = if (sat.svid > 99) 8.sp else 9.5.sp),
+                measurer, sat.svid.toString(), c,
+                svidStyle.copy(fontSize = if (sat.svid > 99) 8.sp else 10.sp),
             )
-        }
-    }
-}
-
-@Composable
-private fun LegendShape(shape: MarkerShape, color: Color) {
-    Canvas(Modifier.size(16.dp)) {
-        translate(size.width / 2f, size.height / 2f) {
-            drawMarker(shape, Offset.Zero, 5.dp.toPx(), Color.Transparent, color, 1.6.dp.toPx())
-        }
-    }
-}
-
-@Composable
-private fun SkyLegend() {
-    Column(Modifier.padding(horizontal = 10.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val shapes = listOf(
-                Triple("GPS", MarkerShape.CIRCLE, NavColors.Gps),
-                Triple("みちびき", MarkerShape.DIAMOND, NavColors.Qzss),
-                Triple("GLONASS", MarkerShape.SQUARE, NavColors.Glonass),
-                Triple("Galileo", MarkerShape.TRIANGLE, NavColors.Galileo),
-                Triple("BeiDou", MarkerShape.HEXAGON, NavColors.BeiDou),
+            drawBadge(
+                measurer, sat.shortLabel, Offset(c.x + markerR * 0.85f, c.y - markerR * 0.85f),
+                5.5.dp.toPx(), constellationColor(sat.constellationType), alpha,
             )
-            for ((name, shape, color) in shapes) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LegendShape(shape, color)
-                    Text(name, color = NavColors.TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(start = 3.dp))
-                }
-            }
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for ((color, label) in listOf(
-                NavColors.Used to "測位に使用中",
-                NavColors.Received to "受信中(未使用)",
-                NavColors.Weak to "弱い/未受信",
-            )) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).background(color, RoundedCornerShape(2.dp)))
-                    Text(label, color = NavColors.TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(start = 4.dp))
-                }
-            }
         }
     }
 }
@@ -387,7 +372,7 @@ private fun SkyLegend() {
 @Composable
 private fun Readout(sat: MergedSatellite?, modifier: Modifier = Modifier) {
     val text = if (sat == null) {
-        "衛星マーカー・バーをタップで詳細"
+        "衛星の球・バーをタップで詳細"
     } else {
         val bands = sat.signals
             .sortedByDescending { it.carrierFrequencyHz ?: 0f }
@@ -408,7 +393,7 @@ private fun Readout(sat: MergedSatellite?, modifier: Modifier = Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .panelSurface(RoundedCornerShape(6.dp))
+            .panelSurface(RoundedCornerShape(8.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
@@ -488,20 +473,23 @@ internal fun SignalBars(
                         val cn0 = sat.cn0DbHz.takeIf { it.isFinite() } ?: 0f
                         val h = maxOf(2.dp.toPx(), (cn0 * k).coerceIn(0f, MAX_CN0_DB_HZ * k))
                         if (sat.key == selectedKey) {
-                            drawRect(Color.White.copy(alpha = 0.10f), Offset(cx - slot / 2f, 2.dp.toPx()), androidx.compose.ui.geometry.Size(slot, size.height - 4.dp.toPx()))
+                            drawRect(NavColors.TextPrimary.copy(alpha = 0.12f), Offset(cx - slot / 2f, 2.dp.toPx()), androidx.compose.ui.geometry.Size(slot, size.height - 4.dp.toPx()))
                         }
-                        val fillColor = markerFill(sat)
-                        // 光沢のある棒: 上が明るく下が濃いグラデーションと、左側のハイライト
+                        val fillColor = levelColor(signalLevelFrom(cn0))
+                        val a = if (sat.usedInFix) 1f else 0.5f
+                        // 光沢のある棒: 上が明るく下が濃いグラデーションと、左側のハイライト（未使用は薄く）
                         drawRect(
                             Brush.verticalGradient(
                                 listOf(lighten(fillColor, 0.35f), fillColor),
                                 startY = base - h, endY = base,
                             ),
                             Offset(cx - barWidth / 2f, base - h), androidx.compose.ui.geometry.Size(barWidth, h),
+                            alpha = a,
                         )
                         drawRect(
                             Color.White.copy(alpha = 0.28f),
                             Offset(cx - barWidth / 2f, base - h), androidx.compose.ui.geometry.Size(barWidth * 0.3f, h),
+                            alpha = a,
                         )
                         drawCentered(
                             measurer, cn0.toInt().toString(), Offset(cx, base - h - 7.dp.toPx()),
@@ -522,40 +510,71 @@ internal fun SignalBars(
     }
 }
 
-// ---------------------------------------------------------------- ラベル/値のボックス
+// ---------------------------------------------------------------- 情報パネル
 
+/**
+ * 情報パネルの行（ラベルと値）。nav-u の並び: 日付・時刻・緯度・経度・速度・高度・測位。
+ * 続けて、このアプリで足した衛星数（使用 / 捕捉）と水平精度。
+ * 測位できていないときの値は nav-u のように「---」。
+ */
+internal fun statusRows(state: GnssUiState): List<Pair<String, String>> {
+    val hasFix = state.fixState != FixState.NO_FIX
+    val p = state.position.takeIf { hasFix }
+    return listOf(
+        "日付" to (p?.timeMillis?.let { formatDateNav(it) } ?: "---"),
+        "時刻" to (p?.timeMillis?.let { formatTimeNav(it) } ?: "---"),
+        "緯度" to (p?.let { formatDmsNav(it.latitude, 'N', 'S') } ?: "---"),
+        "経度" to (p?.let { formatDmsNav(it.longitude, 'E', 'W') } ?: "---"),
+        "速度" to formatSpeedKmh(p?.speedMps),
+        "高度" to (p?.altitudeMeters?.let { String.format(Locale.US, "%.0f m", it) } ?: "---"),
+        "測位" to state.fixState.label,
+        "衛星" to "${state.usedCount} / ${state.capturedCount}",
+        "精度" to (p?.accuracyMeters?.let { String.format(Locale.US, "±%.1f m", it) } ?: "---"),
+    )
+}
+
+/** 右の情報パネル。大きな白い等幅の文字（液晶風）で、値は右寄せ。縦長では 2 列にして高さを抑える。 */
 @Composable
-private fun InfoRows(state: GnssUiState, modifier: Modifier = Modifier) {
-    val rows = infoRows(state.position, state.fixState != FixState.NO_FIX)
-    Column(modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        for ((label, value) in rows) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, color = NavColors.TextPrimary, fontSize = 12.sp, modifier = Modifier.width(58.dp))
-                Text(
-                    value,
-                    color = NavColors.TextPrimary,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                    maxLines = 1,
-                    modifier = Modifier
-                        .weight(1f)
-                        .insetBox()
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                )
+private fun InfoPanel(state: GnssUiState, twoColumns: Boolean, modifier: Modifier = Modifier) {
+    val rows = statusRows(state)
+    Box(
+        modifier
+            .testTag(TAG_INFO_PANEL)
+            .fillMaxWidth()
+            .panelSurface(RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        if (twoColumns) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    rows.take(5).forEach { (l, v) -> InfoRow(l, v, labelWidth = 32.dp, valueSize = 13.sp, labelSize = 11.sp) }
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    rows.drop(5).forEach { (l, v) -> InfoRow(l, v, labelWidth = 32.dp, valueSize = 13.sp, labelSize = 11.sp) }
+                }
+            }
+        } else {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
+                rows.forEach { (l, v) -> InfoRow(l, v, labelWidth = 48.dp, valueSize = 19.sp, labelSize = 14.sp) }
             }
         }
     }
 }
 
-/** 緯度・経度・高度・年月日・現在時刻。測位できていないときは nav-u のように "---"。 */
-internal fun infoRows(position: PositionInfo?, hasFix: Boolean): List<Pair<String, String>> {
-    val p = position.takeIf { hasFix }
-    return listOf(
-        "緯度" to (p?.let { formatDms(it.latitude, 'N', 'S') } ?: "---"),
-        "経度" to (p?.let { formatDms(it.longitude, 'E', 'W') } ?: "---"),
-        "高度" to (p?.altitudeMeters?.let { String.format(Locale.US, "%.0f m", it) } ?: "---"),
-        "年月日" to (p?.timeMillis?.let { formatDateJa(it) } ?: "---"),
-        "現在時刻" to (p?.timeMillis?.let { formatTimeJa(it) } ?: "---"),
-    )
+@Composable
+private fun InfoRow(label: String, value: String, labelWidth: Dp, valueSize: androidx.compose.ui.unit.TextUnit, labelSize: androidx.compose.ui.unit.TextUnit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = NavColors.TextPrimary, fontSize = labelSize, maxLines = 1, modifier = Modifier.width(labelWidth))
+        Text(
+            value,
+            color = NavColors.TextPrimary,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = valueSize,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }

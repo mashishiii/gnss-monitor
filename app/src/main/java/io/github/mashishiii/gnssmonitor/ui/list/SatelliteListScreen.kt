@@ -47,7 +47,6 @@ import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.MAX_CN0_DB_HZ
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
-import io.github.mashishiii.gnssmonitor.data.SignalClass
 import io.github.mashishiii.gnssmonitor.data.uniqueSatelliteKeys
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import io.github.mashishiii.gnssmonitor.ui.theme.glossy
@@ -55,6 +54,9 @@ import io.github.mashishiii.gnssmonitor.ui.theme.insetBox
 import io.github.mashishiii.gnssmonitor.ui.theme.lighten
 import io.github.mashishiii.gnssmonitor.ui.theme.panelSurface
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.alpha
+import io.github.mashishiii.gnssmonitor.data.SignalLevel
+import io.github.mashishiii.gnssmonitor.data.signalLevelFrom
 import java.util.Locale
 import kotlin.math.abs
 
@@ -78,7 +80,7 @@ private fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit
     Box(
         modifier
             .fillMaxWidth()
-            .panelSurface(RoundedCornerShape(8.dp))
+            .panelSurface(RoundedCornerShape(10.dp))
             .padding(12.dp),
     ) { content() }
 }
@@ -88,7 +90,7 @@ private fun StatusHeader(state: GnssUiState) {
     val fix = state.fixState
     val fixColor = when (fix) {
         FixState.NO_FIX -> NavColors.Warning
-        else -> NavColors.UsedText
+        else -> NavColors.TextPrimary
     }
     Panel {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -124,7 +126,6 @@ private fun Mono(text: String) {
         color = NavColors.TextPrimary,
         fontFamily = FontFamily.Monospace,
         fontSize = 15.sp,
-        modifier = Modifier.insetBox().padding(horizontal = 8.dp, vertical = 2.dp),
     )
 }
 
@@ -186,7 +187,8 @@ private fun HeaderCell(text: String, modifier: Modifier, align: TextAlign = Text
 
 @Composable
 private fun SatelliteRow(sat: SatelliteInfo, zebra: Boolean = false) {
-    val color = signalColor(sat.signalClass)
+    val level = signalLevelFrom(sat.cn0DbHz)
+    val color = levelColor(level)
     Row(
         Modifier
             .fillMaxWidth()
@@ -199,10 +201,10 @@ private fun SatelliteRow(sat: SatelliteInfo, zebra: Boolean = false) {
         Text(sat.svid.toString(), color = NavColors.TextPrimary, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.width(ColSvid))
         Text(sat.bandLabel, color = NavColors.TextSecondary, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(ColBand), maxLines = 1)
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            SignalBar(sat.cn0DbHz, color, Modifier.weight(1f))
+            SignalBar(sat.cn0DbHz, color, Modifier.weight(1f).alpha(if (sat.usedInFix) 1f else 0.55f))
             Text(
                 String.format(Locale.US, "%4.1f", sat.cn0DbHz.takeIf { it.isFinite() } ?: 0f),
-                color = signalTextColor(sat.signalClass),
+                color = NavColors.TextPrimary,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 6.dp, end = 4.dp),
@@ -238,16 +240,10 @@ private fun SignalBar(cn0DbHz: Float, color: Color, modifier: Modifier = Modifie
     }
 }
 
-private fun signalColor(signalClass: SignalClass): Color = when (signalClass) {
-    SignalClass.USED -> NavColors.Used
-    SignalClass.RECEIVED -> NavColors.Received
-    SignalClass.WEAK -> NavColors.Weak
-}
-
-private fun signalTextColor(signalClass: SignalClass): Color = when (signalClass) {
-    SignalClass.USED -> NavColors.UsedText
-    SignalClass.RECEIVED -> NavColors.ReceivedText
-    SignalClass.WEAK -> NavColors.WeakText
+private fun levelColor(level: SignalLevel): Color = when (level) {
+    SignalLevel.STRONG -> NavColors.LevelStrong
+    SignalLevel.MEDIUM -> NavColors.LevelMedium
+    SignalLevel.WEAK -> NavColors.LevelWeak
 }
 
 internal fun formatLatitude(position: PositionInfo?): String =
