@@ -34,3 +34,42 @@ fun classifySignal(usedInFix: Boolean, cn0DbHz: Float): SignalClass = when {
     cn0DbHz >= WEAK_CN0_DB_HZ -> SignalClass.RECEIVED
     else -> SignalClass.WEAK
 }
+
+/** 搬送波周波数（Hz）から帯域の目安を返す。 */
+fun bandLabel(carrierFrequencyHz: Float?): String {
+    if (carrierFrequencyHz == null || !carrierFrequencyHz.isFinite() || carrierFrequencyHz <= 0f) return ""
+    val mhz = carrierFrequencyHz / 1_000_000f
+    return when {
+        mhz in 1550f..1620f -> "L1"
+        mhz in 1160f..1195f -> "L5"
+        mhz in 1195f..1270f -> "L2"
+        else -> "-"
+    }
+}
+
+/**
+ * 衛星 1 機分の値を安全な範囲に整える。
+ * NaN / 無限大 / 範囲外の値があっても、描画側（バーの幅など）で例外にならないようにする。
+ */
+fun sanitizeSatellite(sat: SatelliteInfo): SatelliteInfo = sat.copy(
+    cn0DbHz = sat.cn0DbHz.finiteOr(0f).coerceIn(0f, 99f),
+    azimuthDegrees = sat.azimuthDegrees.finiteOr(0f).coerceIn(0f, 360f),
+    elevationDegrees = sat.elevationDegrees.finiteOr(0f).coerceIn(-90f, 90f),
+    carrierFrequencyHz = sat.carrierFrequencyHz?.takeIf { it.isFinite() && it > 0f },
+)
+
+private fun Float.finiteOr(default: Float): Float = if (isFinite()) this else default
+
+/**
+ * LazyColumn 用の一意なキーを作る。
+ * 測位系 + SVID + 周波数だけでは重複しうる（同一周波数が複数行で届く端末がある）ので、
+ * 重複したら出現順の連番を付けて必ず一意にする。
+ */
+fun uniqueSatelliteKeys(satellites: List<SatelliteInfo>): List<String> {
+    val seen = HashMap<String, Int>()
+    return satellites.map { sat ->
+        val base = "${sat.constellationType}-${sat.svid}-${sat.carrierFrequencyHz?.toLong() ?: 0L}"
+        val n = seen.merge(base, 1, Int::plus)!!
+        if (n == 1) base else "$base#$n"
+    }
+}

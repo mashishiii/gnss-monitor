@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
@@ -39,12 +41,14 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import io.github.mashishiii.gnssmonitor.data.CrashLog
 import io.github.mashishiii.gnssmonitor.data.FixState
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.MAX_CN0_DB_HZ
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.data.SignalClass
+import io.github.mashishiii.gnssmonitor.data.uniqueSatelliteKeys
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import java.util.Locale
 import kotlin.math.abs
@@ -67,6 +71,8 @@ fun GnssScreen(viewModel: GnssViewModel) {
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stop() }
 
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var lastCrash by remember { mutableStateOf(CrashLog.read(context)) }
 
     Box(
         Modifier
@@ -74,11 +80,43 @@ fun GnssScreen(viewModel: GnssViewModel) {
             .background(NavColors.Background)
             .safeDrawingPadding(),
     ) {
-        if (permissionGranted) {
+        if (lastCrash != null) {
+            CrashReport(
+                text = lastCrash.orEmpty(),
+                onDismiss = {
+                    CrashLog.clear(context)
+                    lastCrash = null
+                },
+            )
+        } else if (permissionGranted) {
             GnssContent(state)
         } else {
             PermissionRequest(onRequest = { launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION) })
         }
+    }
+}
+
+/** 前回の起動で異常終了していたら、その内容を表示する（開発用）。 */
+@Composable
+private fun CrashReport(text: String, onDismiss: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("前回の起動で異常終了しました", color = NavColors.Warning, fontWeight = FontWeight.Bold)
+        Text(
+            "下のログを開発者に共有してください（画面のスクリーンショットで構いません）。",
+            color = NavColors.TextSecondary,
+            fontSize = 13.sp,
+        )
+        Text(
+            text,
+            color = NavColors.TextPrimary,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+        )
+        Button(onClick = onDismiss) { Text("閉じて続ける") }
     }
 }
 
@@ -170,11 +208,12 @@ private fun Mono(text: String) {
 
 private val ColName = 76.dp
 private val ColSvid = 40.dp
+private val ColBand = 32.dp
 private val ColAngle = 44.dp
 private val ColUsed = 36.dp
 
 @Composable
-private fun SatelliteList(satellites: List<SatelliteInfo>, modifier: Modifier = Modifier) {
+internal fun SatelliteList(satellites: List<SatelliteInfo>, modifier: Modifier = Modifier) {
     Panel(modifier.fillMaxSize()) {
         Column {
             ListHeader()
@@ -186,8 +225,12 @@ private fun SatelliteList(satellites: List<SatelliteInfo>, modifier: Modifier = 
                     modifier = Modifier.padding(top = 16.dp),
                 )
             } else {
+                // 測位系 + SVID だけでは重複する（多周波端末で同じ衛星が複数行届く）ため、一意なキーを作る
+                val keys = remember(satellites) { uniqueSatelliteKeys(satellites) }
                 LazyColumn {
-                    items(satellites, key = { "${it.constellationType}-${it.svid}" }) { SatelliteRow(it) }
+                    itemsIndexed(satellites, key = { index, _ -> keys.getOrElse(index) { "idx-$index" } }) { _, sat ->
+                        SatelliteRow(sat)
+                    }
                 }
             }
         }
@@ -204,6 +247,7 @@ private fun ListHeader() {
     ) {
         HeaderCell("測位系", Modifier.width(ColName))
         HeaderCell("SVID", Modifier.width(ColSvid))
+        HeaderCell("帯域", Modifier.width(ColBand))
         HeaderCell("C/N0 (dB-Hz)", Modifier.weight(1f))
         HeaderCell("方位", Modifier.width(ColAngle), TextAlign.End)
         HeaderCell("仰角", Modifier.width(ColAngle), TextAlign.End)
@@ -227,10 +271,11 @@ private fun SatelliteRow(sat: SatelliteInfo) {
     ) {
         Text(sat.constellationName, color = NavColors.TextPrimary, fontSize = 13.sp, modifier = Modifier.width(ColName), maxLines = 1)
         Text(sat.svid.toString(), color = NavColors.TextPrimary, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.width(ColSvid))
+        Text(sat.bandLabel, color = NavColors.TextSecondary, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(ColBand), maxLines = 1)
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             SignalBar(sat.cn0DbHz, color, Modifier.weight(1f))
             Text(
-                String.format(Locale.US, "%4.1f", sat.cn0DbHz),
+                String.format(Locale.US, "%4.1f", sat.cn0DbHz.takeIf { it.isFinite() } ?: 0f),
                 color = color,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
@@ -250,7 +295,8 @@ private fun SatelliteRow(sat: SatelliteInfo) {
 
 @Composable
 private fun SignalBar(cn0DbHz: Float, color: Color, modifier: Modifier = Modifier) {
-    val fraction = (cn0DbHz / MAX_CN0_DB_HZ).coerceIn(0f, 1f)
+    val raw = cn0DbHz / MAX_CN0_DB_HZ
+    val fraction = if (raw.isFinite()) raw.coerceIn(0f, 1f) else 0f
     Box(
         modifier
             .height(10.dp)

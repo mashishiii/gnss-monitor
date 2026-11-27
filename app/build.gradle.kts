@@ -4,7 +4,7 @@ plugins {
 }
 
 // リリースビルドのバージョンは CI からタグ名を渡す: -PversionName=0.1.0 -PversionCode=12
-val appVersionName = providers.gradleProperty("versionName").getOrElse("0.1.0-dev")
+val appVersionName = providers.gradleProperty("versionName").getOrElse("0.1.1-dev")
 val appVersionCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(1)
 
 // 署名情報は環境変数から読む。未設定ならリリースは未署名のまま（ローカルや PR のビルドを止めない）
@@ -62,7 +62,7 @@ android {
     }
 
     testOptions {
-        unitTests.isReturnDefaultValues = true
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -79,4 +79,8 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
