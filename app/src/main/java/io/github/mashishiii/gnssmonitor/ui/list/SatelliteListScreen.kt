@@ -54,95 +54,8 @@ import java.util.Locale
 import kotlin.math.abs
 
 @Composable
-fun GnssScreen(viewModel: GnssViewModel) {
-    var permissionGranted by remember { mutableStateOf(viewModel.hasPermission()) }
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        permissionGranted = granted
-        if (granted) viewModel.start()
-    }
-
-    // 画面が見えている間だけ GNSS の更新を受ける（v0.1 は記録サービスなし）
-    LifecycleEventEffect(Lifecycle.Event.ON_START) {
-        permissionGranted = viewModel.hasPermission()
-        if (permissionGranted) viewModel.start()
-    }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.stop() }
-
-    val state by viewModel.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var lastCrash by remember { mutableStateOf(CrashLog.read(context)) }
-
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(NavColors.Background)
-            .safeDrawingPadding(),
-    ) {
-        if (lastCrash != null) {
-            CrashReport(
-                text = lastCrash.orEmpty(),
-                onDismiss = {
-                    CrashLog.clear(context)
-                    lastCrash = null
-                },
-            )
-        } else if (permissionGranted) {
-            GnssContent(state)
-        } else {
-            PermissionRequest(onRequest = { launcher.launch(Manifest.permission.ACCESS_FINE_LOCATION) })
-        }
-    }
-}
-
-/** 前回の起動で異常終了していたら、その内容を表示する（開発用）。 */
-@Composable
-private fun CrashReport(text: String, onDismiss: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("前回の起動で異常終了しました", color = NavColors.Warning, fontWeight = FontWeight.Bold)
-        Text(
-            "下のログを開発者に共有してください（画面のスクリーンショットで構いません）。",
-            color = NavColors.TextSecondary,
-            fontSize = 13.sp,
-        )
-        Text(
-            text,
-            color = NavColors.TextPrimary,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 10.sp,
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-        )
-        Button(onClick = onDismiss) { Text("閉じて続ける") }
-    }
-}
-
-@Composable
-private fun PermissionRequest(onRequest: () -> Unit) {
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            "衛星の情報を表示するには位置情報の許可が必要です",
-            color = NavColors.TextPrimary,
-            textAlign = TextAlign.Center,
-        )
-        Button(onClick = onRequest, modifier = Modifier.padding(top = 16.dp)) {
-            Text("位置情報を許可する")
-        }
-    }
-}
-
-@Composable
-private fun GnssContent(state: GnssUiState) {
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+fun SatelliteListScreen(state: GnssUiState, modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         StatusHeader(state)
         if (!state.gpsEnabled) {
             Text(
@@ -276,7 +189,7 @@ private fun SatelliteRow(sat: SatelliteInfo) {
             SignalBar(sat.cn0DbHz, color, Modifier.weight(1f))
             Text(
                 String.format(Locale.US, "%4.1f", sat.cn0DbHz.takeIf { it.isFinite() } ?: 0f),
-                color = color,
+                color = signalTextColor(sat.signalClass),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 6.dp, end = 4.dp),
@@ -286,7 +199,7 @@ private fun SatelliteRow(sat: SatelliteInfo) {
         Text("${sat.elevationDegrees.toInt()}°", color = NavColors.TextSecondary, fontFamily = FontFamily.Monospace, fontSize = 12.sp, textAlign = TextAlign.End, modifier = Modifier.width(ColAngle))
         Text(
             if (sat.usedInFix) "●" else "－",
-            color = if (sat.usedInFix) NavColors.Used else NavColors.Weak,
+            color = if (sat.usedInFix) NavColors.UsedText else NavColors.WeakText,
             textAlign = TextAlign.Center,
             modifier = Modifier.width(ColUsed),
         )
@@ -316,6 +229,12 @@ private fun signalColor(signalClass: SignalClass): Color = when (signalClass) {
     SignalClass.USED -> NavColors.Used
     SignalClass.RECEIVED -> NavColors.Received
     SignalClass.WEAK -> NavColors.Weak
+}
+
+private fun signalTextColor(signalClass: SignalClass): Color = when (signalClass) {
+    SignalClass.USED -> NavColors.UsedText
+    SignalClass.RECEIVED -> NavColors.ReceivedText
+    SignalClass.WEAK -> NavColors.WeakText
 }
 
 internal fun formatLatitude(position: PositionInfo?): String =

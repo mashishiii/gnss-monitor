@@ -31,6 +31,9 @@ data class PositionInfo(
     val latitude: Double,
     val longitude: Double,
     val accuracyMeters: Float?,
+    val altitudeMeters: Double? = null,
+    /** 測位時刻（Unix ミリ秒、GNSS の時刻）。 */
+    val timeMillis: Long? = null,
 )
 
 /** 画面に出す 1 秒ごとのスナップショット。 */

@@ -11,6 +11,7 @@ import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.SystemClock
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ class GnssRepository(context: Context) {
 
     // コールバックが随時更新する最新値。1 秒ごとに state へ反映する。
     private var latestPosition: PositionInfo? = null
+    private var latestPositionAtMs = 0L
     private var latestSatellites: List<SatelliteInfo> = emptyList()
     private var started = false
     private var tickerJob: Job? = null
@@ -54,7 +56,10 @@ class GnssRepository(context: Context) {
                     latitude = lat,
                     longitude = lon,
                     accuracyMeters = if (location.hasAccuracy()) location.accuracy.takeIf { it.isFinite() } else null,
+                    altitudeMeters = if (location.hasAltitude()) location.altitude.takeIf { it.isFinite() } else null,
+                    timeMillis = location.time.takeIf { it > 0L },
                 )
+                latestPositionAtMs = SystemClock.elapsedRealtime()
             }
         }
 
@@ -146,12 +151,16 @@ class GnssRepository(context: Context) {
             .getOrDefault(false)
         _state.value = GnssUiState(
             gpsEnabled = gpsEnabled,
-            position = latestPosition,
+            // 10 秒以上位置が更新されていなければ「測位なし」として扱う（古い値を出し続けない）
+            position = latestPosition?.takeIf {
+                SystemClock.elapsedRealtime() - latestPositionAtMs <= POSITION_STALE_MS
+            },
             satellites = latestSatellites,
         )
     }
 
     private companion object {
         const val UPDATE_INTERVAL_MS = 1000L
+        const val POSITION_STALE_MS = 10_000L
     }
 }

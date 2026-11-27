@@ -73,3 +73,25 @@ fun uniqueSatelliteKeys(satellites: List<SatelliteInfo>): List<String> {
         if (n == 1) base else "$base#$n"
     }
 }
+
+/** 度（小数）を「35° 39′ 31″ N」形式にする。 */
+fun formatDms(degrees: Double, positive: Char, negative: Char): String {
+    val totalSeconds = Math.round(Math.abs(degrees) * 3600.0)
+    val d = totalSeconds / 3600
+    val m = (totalSeconds % 3600) / 60
+    val s = totalSeconds % 60
+    val hemi = if (degrees >= 0) positive else negative
+    return "${d}° ${m.toString().padStart(2, '0')}′ ${s.toString().padStart(2, '0')}″ $hemi"
+}
+
+/** 「2026年11月27日」形式。 */
+fun formatDateJa(millis: Long, timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()): String =
+    java.text.SimpleDateFormat("yyyy年M月d日", java.util.Locale.JAPAN)
+        .apply { this.timeZone = timeZone }
+        .format(java.util.Date(millis))
+
+/** 「10時59分08秒」形式。 */
+fun formatTimeJa(millis: Long, timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()): String =
+    java.text.SimpleDateFormat("HH時mm分ss秒", java.util.Locale.JAPAN)
+        .apply { this.timeZone = timeZone }
+        .format(java.util.Date(millis))
