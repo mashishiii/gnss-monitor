@@ -17,6 +17,8 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
+import io.github.mashishiii.gnssmonitor.data.MapOrientation
+import io.github.mashishiii.gnssmonitor.data.MotionMode
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
@@ -214,7 +216,7 @@ class StatusScreenTest {
         val node = composeRule.onNodeWithTag(TAG_SKY_PLOT)
         val size = node.fetchSemanticsNode().size
         val density = composeRule.density.density
-        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), 18f * density)
+        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), SKY_MARGIN_DP * density)
         // GPS 7 は方位 90°・仰角 0° = 右の外周
         val p = skyPosition(90f, 0f, layout)
         node.performTouchInput { click(Offset(p.x, p.y)) }
@@ -253,5 +255,131 @@ class StatusScreenTest {
         composeRule.waitForIdle()
         assertEquals("1-25", selected)
         composeRule.onNodeWithText("L1:40.0 L5:33.0", substring = true).assertExists()
+    }
+
+    // ---- v0.6 ヘディングアップ
+    private fun renderOriented(
+        state: GnssUiState,
+        orientation: MapOrientation,
+        selected: String? = null,
+        onSelect: (String?) -> Unit = {},
+        onToggle: () -> Unit = {},
+    ) {
+        composeRule.setContent {
+            GnssMonitorTheme {
+                Box(Modifier.requiredSize(360.dp, 700.dp)) {
+                    StatusScreen(
+                        state, selected, onSelect, Modifier.requiredSize(360.dp, 700.dp),
+                        orientation = orientation, motion = MotionMode.RETRO, onToggleOrientation = onToggle,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+    }
+
+    @Test
+    fun noHeadingHintShownOnlyInHeadingUpWithoutAnyHeading() {
+        renderOriented(fixState, MapOrientation.HEADING_UP)
+        // テストの画面（既定 320×470dp）より表示用の枠が大きいので、表示ではなく「スカイプロットの左上に出る」ことで確かめる
+        composeRule.onNodeWithTag(TAG_NO_HEADING).assertExists()
+        composeRule.onNodeWithText("方位なし").assertExists()
+        val hint = composeRule.onNodeWithTag(TAG_NO_HEADING).fetchSemanticsNode().positionInRoot
+        val sky = composeRule.onNodeWithTag(TAG_SKY_PLOT).fetchSemanticsNode()
+        assertTrue(hint.x >= sky.positionInRoot.x && hint.x < sky.positionInRoot.x + sky.size.width / 2f)
+        assertTrue(hint.y >= sky.positionInRoot.y && hint.y < sky.positionInRoot.y + sky.size.height / 2f)
+    }
+
+    @Test
+    fun noHeadingHintHiddenInNorthUp() {
+        renderOriented(fixState, MapOrientation.NORTH_UP)
+        composeRule.onNodeWithTag(TAG_NO_HEADING).assertDoesNotExist()
+    }
+
+    @Test
+    fun noHeadingHintHiddenOnceAHeldHeadingExists() {
+        renderOriented(fixState.copy(heading = 120f), MapOrientation.HEADING_UP)
+        composeRule.onNodeWithTag(TAG_NO_HEADING).assertDoesNotExist()
+    }
+
+    @Test
+    fun headingUpWithoutHeadingKeepsNorthUpCoordinates() {
+        // 方位なしのヘディングアップは北が上と同じ座標: 東の水平線の衛星（GPS 7）は右の外周
+        var selected: String? = null
+        renderOriented(fixState, MapOrientation.HEADING_UP, onSelect = { selected = it })
+        val node = composeRule.onNodeWithTag(TAG_SKY_PLOT)
+        val size = node.fetchSemanticsNode().size
+        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), SKY_MARGIN_DP * composeRule.density.density)
+        val p = skyPosition(90f, 0f, layout)
+        node.performTouchInput { click(Offset(p.x, p.y)) }
+        composeRule.waitForIdle()
+        assertEquals("1-7", selected)
+    }
+
+    @Test
+    fun headingUpRotatesSpheresButListKeepsTrueNorthValues() {
+        // 東へ走行中（heading 90°）: 東の水平線の衛星（GPS 7）は真上、詳細の方位は真北基準の 90° のまま
+        var selected by mutableStateOf<String?>(null)
+        renderOriented(fixState.copy(heading = 90f), MapOrientation.HEADING_UP, selected = null, onSelect = { selected = it })
+        val node = composeRule.onNodeWithTag(TAG_SKY_PLOT)
+        val size = node.fetchSemanticsNode().size
+        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), SKY_MARGIN_DP * composeRule.density.density)
+        val rotated = skyPosition(90f, 0f, layout, 90f)
+        assertEquals(layout.cx, rotated.x, 0.5f)
+        assertEquals(layout.cy - layout.radius, rotated.y, 0.5f)
+        node.performTouchInput { click(Offset(rotated.x, rotated.y)) }
+        composeRule.waitForIdle()
+        assertEquals("1-7", selected)
+    }
+
+    @Test
+    fun selectedDetailKeepsTrueNorthAzimuthWhenHeadingUp() {
+        composeRule.setContent {
+            GnssMonitorTheme {
+                Box(Modifier.requiredSize(360.dp, 700.dp)) {
+                    StatusScreen(
+                        fixState.copy(heading = 90f), "1-7", {}, Modifier.requiredSize(360.dp, 700.dp),
+                        orientation = MapOrientation.HEADING_UP,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("GPS 7 方位90° 仰角0°", substring = true).assertExists()
+    }
+
+    @Test
+    fun tappingRimNToggleOrientationAndRotatesWithHeading() {
+        var toggles = 0
+        renderOriented(fixState.copy(heading = 90f), MapOrientation.HEADING_UP, onToggle = { toggles++ })
+        val node = composeRule.onNodeWithTag(TAG_SKY_PLOT)
+        val size = node.fetchSemanticsNode().size
+        val density = composeRule.density.density
+        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), SKY_MARGIN_DP * density)
+        // 東向きなので N は左の外周
+        val n = skyRimPosition(0f, layout, SKY_RIM_GAP_DP * density, 90f)
+        assertTrue(n.x < layout.cx - layout.radius)
+        node.performTouchInput { click(Offset(n.x, n.y)) }
+        composeRule.waitForIdle()
+        assertEquals(1, toggles)
+        // 以前の N の位置（真上）をタップしても切り替わらない
+        val top = skyRimPosition(0f, layout, SKY_RIM_GAP_DP * density)
+        node.performTouchInput { click(Offset(top.x, top.y)) }
+        composeRule.waitForIdle()
+        assertEquals(1, toggles)
+    }
+
+    @Test
+    fun northUpRimNIsOnTopAndTogglesToo() {
+        var toggles = 0
+        renderOriented(fixState, MapOrientation.NORTH_UP, onToggle = { toggles++ })
+        val node = composeRule.onNodeWithTag(TAG_SKY_PLOT)
+        val size = node.fetchSemanticsNode().size
+        val density = composeRule.density.density
+        val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), SKY_MARGIN_DP * density)
+        val n = skyRimPosition(0f, layout, SKY_RIM_GAP_DP * density)
+        node.performTouchInput { click(Offset(n.x, n.y)) }
+        composeRule.waitForIdle()
+        assertEquals(1, toggles)
     }
 }

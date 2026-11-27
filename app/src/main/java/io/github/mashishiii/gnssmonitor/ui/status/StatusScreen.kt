@@ -60,6 +60,11 @@ import io.github.mashishiii.gnssmonitor.data.formatSpeedKmh
 import io.github.mashishiii.gnssmonitor.data.formatTimeNav
 import io.github.mashishiii.gnssmonitor.ui.theme.darken
 import io.github.mashishiii.gnssmonitor.data.BandFamily
+import io.github.mashishiii.gnssmonitor.data.MapOrientation
+import io.github.mashishiii.gnssmonitor.data.MotionMode
+import io.github.mashishiii.gnssmonitor.data.headingUpActive
+import io.github.mashishiii.gnssmonitor.data.skyHeadingFor
+import io.github.mashishiii.gnssmonitor.ui.rememberDisplayHeading
 import io.github.mashishiii.gnssmonitor.data.GnssStats
 import io.github.mashishiii.gnssmonitor.data.computeGnssStats
 import io.github.mashishiii.gnssmonitor.data.dualFreqLabel
@@ -84,6 +89,7 @@ internal const val TAG_SIGNAL_BARS = "signalBars"
 internal const val TAG_LEVEL_PANEL = "levelPanel"
 internal const val TAG_INFO_PANEL = "infoPanel"
 internal const val TAG_BAND_CHIPS = "bandChips"
+internal const val TAG_NO_HEADING = "noHeadingHint"
 internal const val TAG_SPARKLINE = "accuracySparkline"
 internal const val TAG_CONSTELLATION_STATS = "constellationStats"
 
@@ -98,16 +104,28 @@ fun StatusScreen(
     selectedKey: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    /** 地図と共通の向き（既定のノースアップは、設定を渡さない画面・テスト用）。 */
+    orientation: MapOrientation = MapOrientation.NORTH_UP,
+    motion: MotionMode = MotionMode.RETRO,
+    onToggleOrientation: () -> Unit = {},
 ) {
     val sats = remember(state.satellites) { mergeSatellites(state.satellites) }
+    // 文字盤を回す進行方向。レトロは測位ごとにジャンプ、スムーズは補間（地図と同じ規則）
+    val displayHeading = rememberDisplayHeading(state.heading, motion)
+    val sky = SkyOrientation(
+        active = headingUpActive(orientation, displayHeading),
+        headingDegrees = skyHeadingFor(orientation, displayHeading),
+        noHeading = orientation == MapOrientation.HEADING_UP && state.heading == null,
+        onToggle = onToggleOrientation,
+    )
     val selected = sats.firstOrNull { it.key == selectedKey }
     val stats = remember(state.satellites) { computeGnssStats(state.satellites) }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         if (maxWidth >= WideThreshold) {
-            WideLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight)
+            WideLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight, sky)
         } else {
-            NarrowLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight)
+            NarrowLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight, sky)
         }
     }
 }
@@ -122,6 +140,14 @@ private val NarrowMinSky = 200.dp
 /** スクロールなしで収める配置にできるか。 */
 internal fun narrowFitsWithoutScroll(maxHeight: Dp): Boolean = maxHeight - NarrowReservedHeight >= NarrowMinSky
 
+/** スカイプロットの向きの状態。[active] = ヘディングアップで実際に回している、[noHeading] = ヘディングアップだが方位がまだ無い。 */
+internal data class SkyOrientation(
+    val active: Boolean = false,
+    val headingDegrees: Float = 0f,
+    val noHeading: Boolean = false,
+    val onToggle: () -> Unit = {},
+)
+
 @Composable
 private fun NarrowLayout(
     state: GnssUiState,
@@ -131,6 +157,7 @@ private fun NarrowLayout(
     onSelect: (String?) -> Unit,
     maxWidth: Dp,
     maxHeight: Dp,
+    skyOrientation: SkyOrientation,
 ) {
     if (narrowFitsWithoutScroll(maxHeight)) {
         // スカイプロットが残りの高さを使う（下のボタンと重ならず、情報パネルの最後の行まで一画面に収まる）
@@ -139,7 +166,7 @@ private fun NarrowLayout(
                 LevelPanel(Modifier.width(LevelPanelWidthNarrow).fillMaxHeight())
                 Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                     SkyPlot(
-                        sats, selected?.key, onSelect,
+                        sats, selected?.key, onSelect, skyOrientation,
                         Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true).testTag(TAG_SKY_PLOT),
                     )
                 }
@@ -159,7 +186,7 @@ private fun NarrowLayout(
             Row(Modifier.fillMaxWidth().height(sky), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 LevelPanel(Modifier.width(LevelPanelWidthNarrow).fillMaxHeight())
                 Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    SkyPlot(sats, selected?.key, onSelect, Modifier.size(sky).testTag(TAG_SKY_PLOT))
+                    SkyPlot(sats, selected?.key, onSelect, skyOrientation, Modifier.size(sky).testTag(TAG_SKY_PLOT))
                 }
             }
             Readout(selected)
@@ -182,6 +209,7 @@ private fun WideLayout(
     onSelect: (String?) -> Unit,
     maxWidth: Dp,
     maxHeight: Dp,
+    skyOrientation: SkyOrientation,
 ) {
     val topHeight = maxHeight - WideBottomHeight - 16.dp
     val fits = topHeight >= 230.dp
@@ -193,7 +221,7 @@ private fun WideLayout(
         ) {
             LevelPanel(Modifier.width(LevelPanelWidthWide).fillMaxHeight(), large = true)
             Box(Modifier.width(skySize).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                SkyPlot(sats, selected?.key, onSelect, Modifier.size(skySize).testTag(TAG_SKY_PLOT))
+                SkyPlot(sats, selected?.key, onSelect, skyOrientation, Modifier.size(skySize).testTag(TAG_SKY_PLOT))
             }
             InfoPanel(state, stats, twoColumns = false, modifier = Modifier.weight(1f).fillMaxHeight())
         }
@@ -327,72 +355,107 @@ internal fun SkyPlot(
     sats: List<MergedSatellite>,
     selectedKey: String?,
     onSelect: (String?) -> Unit,
+    orientation: SkyOrientation,
     modifier: Modifier = Modifier,
 ) {
     val measurer = rememberTextMeasurer()
     val currentSats by rememberUpdatedState(sats)
     val currentSelected by rememberUpdatedState(selectedKey)
     val currentOnSelect by rememberUpdatedState(onSelect)
+    val currentOrientation by rememberUpdatedState(orientation)
 
-    Canvas(
-        modifier.pointerInput(Unit) {
-            detectTapGestures { tap ->
-                val margin = 18.dp.toPx()
-                val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), margin)
-                val hits = currentSats.map { it.key to skyPosition(it.azimuthDegrees, it.elevationDegrees, layout) }
-                val key = hitTest(hits, tap.x, tap.y, 20.dp.toPx())
-                // もう一度タップすると選択を外す
-                currentOnSelect(if (key == null || key == currentSelected) null else key)
+    Box(modifier) {
+        Canvas(
+            Modifier.fillMaxSize().pointerInput(Unit) {
+                detectTapGestures { tap ->
+                    val margin = SKY_MARGIN_DP.dp.toPx()
+                    val layout = skyLayout(size.width.toFloat(), size.height.toFloat(), margin)
+                    val h = currentOrientation.headingDegrees
+                    val hits = currentSats.map { it.key to skyPosition(it.azimuthDegrees, it.elevationDegrees, layout, h) }
+                    val north = skyRimPosition(0f, layout, SKY_RIM_GAP_DP.dp.toPx(), h)
+                    when (val action = skyTapAction(hits, north, tap.x, tap.y, 20.dp.toPx(), 14.dp.toPx(), currentSelected)) {
+                        // 外周の「N」: 地図と共通の向きを切り替える
+                        SkyTap.ToggleOrientation -> currentOrientation.onToggle()
+                        // もう一度タップすると選択を外す
+                        is SkyTap.Select -> currentOnSelect(action.key)
+                    }
+                }
+            },
+        ) {
+            val layout = skyLayout(size.width, size.height, SKY_MARGIN_DP.dp.toPx())
+            val center = Offset(layout.cx, layout.cy)
+            val r = layout.radius
+            val heading = orientation.headingDegrees
+
+            // 文字盤: 中心が暗く縁が紫の放射グラデーション、細い白い外周、仰角リング 2 本、白い十字線
+            drawCircle(
+                Brush.radialGradient(listOf(NavColors.DialCenter, NavColors.DialEdge), center = center, radius = r),
+                r, center,
+            )
+            drawCircle(NavColors.DialRing, elevationRingRadius(30f, layout), center, style = Stroke(1.dp.toPx()))
+            drawCircle(NavColors.DialRing, elevationRingRadius(60f, layout), center, style = Stroke(1.dp.toPx()))
+            drawLine(NavColors.DialLine, Offset(center.x - r, center.y), Offset(center.x + r, center.y), 1.dp.toPx())
+            drawLine(NavColors.DialLine, Offset(center.x, center.y - r), Offset(center.x, center.y + r), 1.dp.toPx())
+            drawCircle(NavColors.DialLine, r, center, style = Stroke(1.5.dp.toPx()))
+
+            // 方位: ノースアップは上の「N」だけ（nav-u と同じ）。ヘディングアップでは「N」が真北の位置の外周へ回り、
+            // 北が上でなくなるので E / S / W も出す。文字は回さず、いつも直立
+            val gap = SKY_RIM_GAP_DP.dp.toPx()
+            val labelStyle = TextStyle(color = NavColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            val n = skyRimPosition(0f, layout, gap, heading)
+            // 「N」はタップで向きを切り替えられるので、細い輪で目印にする
+            drawCircle(NavColors.DialLine.copy(alpha = 0.7f), 10.dp.toPx(), Offset(n.x, n.y), style = Stroke(1.dp.toPx()))
+            drawCentered(measurer, "N", Offset(n.x, n.y), labelStyle)
+            if (orientation.active) {
+                for ((text, deg) in listOf("E" to 90f, "S" to 180f, "W" to 270f)) {
+                    val p = skyRimPosition(deg, layout, gap, heading)
+                    drawCentered(measurer, text, Offset(p.x, p.y), labelStyle.copy(fontSize = 13.sp, fontWeight = FontWeight.Normal))
+                }
             }
-        },
-    ) {
-        val layout = skyLayout(size.width, size.height, 18.dp.toPx())
-        val center = Offset(layout.cx, layout.cy)
-        val r = layout.radius
 
-        // 文字盤: 中心が暗く縁が紫の放射グラデーション、細い白い外周、仰角リング 2 本、白い十字線
-        drawCircle(
-            Brush.radialGradient(listOf(NavColors.DialCenter, NavColors.DialEdge), center = center, radius = r),
-            r, center,
-        )
-        drawCircle(NavColors.DialRing, elevationRingRadius(30f, layout), center, style = Stroke(1.dp.toPx()))
-        drawCircle(NavColors.DialRing, elevationRingRadius(60f, layout), center, style = Stroke(1.dp.toPx()))
-        drawLine(NavColors.DialLine, Offset(center.x - r, center.y), Offset(center.x + r, center.y), 1.dp.toPx())
-        drawLine(NavColors.DialLine, Offset(center.x, center.y - r), Offset(center.x, center.y + r), 1.dp.toPx())
-        drawCircle(NavColors.DialLine, r, center, style = Stroke(1.5.dp.toPx()))
-
-        // 方位は上の「N」だけ（nav-u と同じ。北が上）
-        drawCentered(
-            measurer, "N", Offset(center.x, center.y - r - 9.dp.toPx()),
-            TextStyle(color = NavColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold),
-        )
-
-        val markerR = 11.dp.toPx()
-        val svidStyle = TextStyle(color = NavColors.OnSphere, fontWeight = FontWeight.Bold)
-        // 選択中の球は最後（最前面）に描く
-        val ordered = sats.sortedBy { it.key == selectedKey }
-        for (sat in ordered) {
-            val p = skyPosition(sat.azimuthDegrees, sat.elevationDegrees, layout)
-            val c = Offset(p.x, p.y)
-            val alpha = if (sat.usedInFix) 1f else 0.5f
-            if (sat.key == selectedKey) {
-                drawCircle(
-                    NavColors.TextPrimary, markerR + 7.dp.toPx(), c,
-                    style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))),
+            val markerR = 11.dp.toPx()
+            val svidStyle = TextStyle(color = NavColors.OnSphere, fontWeight = FontWeight.Bold)
+            // 選択中の球は最後（最前面）に描く
+            val ordered = sats.sortedBy { it.key == selectedKey }
+            for (sat in ordered) {
+                val p = skyPosition(sat.azimuthDegrees, sat.elevationDegrees, layout, heading)
+                val c = Offset(p.x, p.y)
+                val alpha = if (sat.usedInFix) 1f else 0.5f
+                if (sat.key == selectedKey) {
+                    drawCircle(
+                        NavColors.TextPrimary, markerR + 7.dp.toPx(), c,
+                        style = Stroke(1.5.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))),
+                    )
+                }
+                drawSphere(c, markerR, levelColor(signalLevelFrom(sat.cn0DbHz)), alpha)
+                drawCentered(
+                    measurer, sat.svid.toString(), c,
+                    svidStyle.copy(fontSize = if (sat.svid > 99) 8.sp else 10.sp),
+                )
+                drawBadge(
+                    measurer, sat.shortLabel, Offset(c.x + markerR * 0.85f, c.y - markerR * 0.85f),
+                    5.5.dp.toPx(), constellationColor(sat.constellationType), alpha,
                 )
             }
-            drawSphere(c, markerR, levelColor(signalLevelFrom(sat.cn0DbHz)), alpha)
-            drawCentered(
-                measurer, sat.svid.toString(), c,
-                svidStyle.copy(fontSize = if (sat.svid > 99) 8.sp else 10.sp),
-            )
-            drawBadge(
-                measurer, sat.shortLabel, Offset(c.x + markerR * 0.85f, c.y - markerR * 0.85f),
-                5.5.dp.toPx(), constellationColor(sat.constellationType), alpha,
+        }
+        // ヘディングアップを選んでいるが方位がまだ取れていないとき: 北が上のまま、理由を小さく出す
+        if (orientation.noHeading) {
+            Text(
+                "方位なし",
+                color = NavColors.TextSecondary,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                softWrap = false,
+                maxLines = 1,
+                modifier = Modifier.align(Alignment.TopStart).padding(start = 2.dp, top = 2.dp).testTag(TAG_NO_HEADING),
             )
         }
     }
 }
+
+/** スカイプロットの外周ラベル（N / E / S / W）のための余白（四方向とも）と、外周からラベル中心までの距離。 */
+internal const val SKY_MARGIN_DP = 20f
+internal const val SKY_RIM_GAP_DP = 9f
 
 // ---------------------------------------------------------------- 詳細表示
 

@@ -18,18 +18,62 @@ fun skyLayout(width: Float, height: Float, marginPx: Float): SkyLayout =
     SkyLayout(width / 2f, height / 2f, (min(width, height) / 2f - marginPx).coerceAtLeast(1f))
 
 /**
- * 方位・仰角（度）をスカイプロット上の座標へ。北が上、東が右、天頂（仰角 90°）が中心、地平線（0°）が外周。
- * 範囲外・NaN の値は安全な範囲に丸める。
+ * 方位・仰角（度）をスカイプロット上の座標へ。天頂（仰角 90°）が中心、地平線（0°）が外周。
+ * 既定（[headingDegrees] = 0）は北が上、東が右。ヘディングアップでは進行方向 [headingDegrees] を上にするので、
+ * 方位から進行方向を引いた角度で置く。範囲外・NaN の値は安全な範囲に丸める。
  */
-fun skyPosition(azimuthDegrees: Float, elevationDegrees: Float, layout: SkyLayout): Point {
+fun skyPosition(azimuthDegrees: Float, elevationDegrees: Float, layout: SkyLayout, headingDegrees: Float = 0f): Point {
     val el = if (elevationDegrees.isFinite()) elevationDegrees.coerceIn(0f, 90f) else 0f
     val az = if (azimuthDegrees.isFinite()) azimuthDegrees else 0f
+    val h = if (headingDegrees.isFinite()) headingDegrees else 0f
     val r = layout.radius * (90f - el) / 90f
-    val a = az.toDouble() * PI / 180.0
+    val a = (az - h).toDouble() * PI / 180.0
     return Point(
         x = layout.cx + (r * sin(a)).toFloat(),
         y = layout.cy - (r * cos(a)).toFloat(),
     )
+}
+
+/**
+ * 外周ラベル（N / E / S / W）の中心。真北から時計回りの角度 [compassDegrees]（N = 0、E = 90、S = 180、W = 270）の
+ * 方向で、外周の [gapPx] だけ外側。ヘディングアップでは [headingDegrees] ぶん回る（東向きなら N は左）。
+ */
+fun skyRimPosition(compassDegrees: Float, layout: SkyLayout, gapPx: Float, headingDegrees: Float = 0f): Point {
+    val a = (compassDegrees - headingDegrees).toDouble() * PI / 180.0
+    val r = layout.radius + gapPx
+    return Point(
+        x = layout.cx + (r * sin(a)).toFloat(),
+        y = layout.cy - (r * cos(a)).toFloat(),
+    )
+}
+
+/** スカイプロットのタップの結果。 */
+sealed interface SkyTap {
+    /** 外周の「N」: 向きの切り替え。 */
+    data object ToggleOrientation : SkyTap
+
+    /** 球の選択（同じ球をもう一度 = null で解除）。 */
+    data class Select(val key: String?) : SkyTap
+}
+
+/**
+ * タップを「N の切り替え」か「球の選択」に振り分ける。「N」（中心 [northCenter]、半径 [northHitRadius] 以内）は
+ * 球より優先。それ以外は [hitRadius] 内で最も近い球。
+ */
+fun skyTapAction(
+    markers: List<Pair<String, Point>>,
+    northCenter: Point,
+    x: Float,
+    y: Float,
+    hitRadius: Float,
+    northHitRadius: Float,
+    selectedKey: String?,
+): SkyTap {
+    val dx = northCenter.x - x
+    val dy = northCenter.y - y
+    if (sqrt(dx * dx + dy * dy) <= northHitRadius) return SkyTap.ToggleOrientation
+    val key = hitTest(markers, x, y, hitRadius)
+    return SkyTap.Select(if (key == null || key == selectedKey) null else key)
 }
 
 /** 仰角リング（60°・30°・0°）の半径。 */

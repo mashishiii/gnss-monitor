@@ -91,6 +91,16 @@ class ThemeTest {
         check("$tag 地図の凡例・状態ボックスの補助文字", NavColors.TextSecondary, NavColors.OverlayBg.copy(alpha = 1f), 4.5)
         // 文字盤の上の「N」
         check("$tag N on 背景", NavColors.TextPrimary, NavColors.Background, 6.5)
+        // v0.6: 方位バッジの N・キャプション、動きボタンの文字、スカイプロットの N/E/S/W、「方位なし」
+        check("$tag 方位バッジの N on 文字盤中央", NavColors.TextPrimary, NavColors.DialCenter, 4.5)
+        check("$tag 方位バッジの N on 文字盤縁", NavColors.TextPrimary, NavColors.DialEdge, 4.5)
+        check("$tag 方位バッジのキャプション on 地図の重ね表示", NavColors.TextPrimary, NavColors.OverlayBg.copy(alpha = 1f), 6.5)
+        check("$tag 動きボタン上（レトロ）", NavColors.TextPrimary, NavColors.ButtonTop, 4.5)
+        check("$tag 動きボタン下（レトロ）", NavColors.TextPrimary, NavColors.ButtonBottom, 4.5)
+        check("$tag 動きボタン上（スムーズ）", NavColors.OnButtonOn, NavColors.ButtonOnTop, 4.5)
+        check("$tag 動きボタン下（スムーズ）", NavColors.OnButtonOn, NavColors.ButtonOnBottom, 4.5)
+        check("$tag スカイプロットの N/E/S/W on 背景", NavColors.TextPrimary, NavColors.Background, 6.5)
+        check("$tag 「方位なし」on 背景", NavColors.TextSecondary, NavColors.Background, 4.5)
     }
 
     @Test

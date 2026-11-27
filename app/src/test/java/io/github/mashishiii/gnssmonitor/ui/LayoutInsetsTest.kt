@@ -9,6 +9,12 @@ import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
+import io.github.mashishiii.gnssmonitor.data.MapOrientation
+import io.github.mashishiii.gnssmonitor.ui.status.SKY_MARGIN_DP
+import io.github.mashishiii.gnssmonitor.ui.status.SKY_RIM_GAP_DP
+import io.github.mashishiii.gnssmonitor.ui.status.TAG_SKY_PLOT
+import io.github.mashishiii.gnssmonitor.ui.status.skyLayout
+import io.github.mashishiii.gnssmonitor.ui.status.skyRimPosition
 import io.github.mashishiii.gnssmonitor.ui.status.TAG_BAND_CHIPS
 import io.github.mashishiii.gnssmonitor.ui.status.TAG_CONSTELLATION_STATS
 import io.github.mashishiii.gnssmonitor.ui.status.TAG_INFO_PANEL
@@ -78,6 +84,48 @@ class LayoutInsetsTest {
     @Test
     @Config(qualifiers = "w673dp-h841dp-xhdpi")
     fun unfoldedPortraitFitsAboveNav() = assertAltitudeRowAboveNav()
+
+    /** v0.6: ヘディングアップで N/E/S/W が回っても、ボタンに重ならずキャンバスの中に収まる（四方向 × 折りたたみ・展開）。 */
+    private fun assertRimLabelsFit(heading: Float) {
+        val headed = state.copy(heading = heading)
+        rule.setContent { GnssMonitorTheme { AppContent(headed, TrackRecorder.State(), initialOrientation = MapOrientation.HEADING_UP) } }
+        rule.waitForIdle()
+        val density = rule.density.density
+        val sky = rule.onNodeWithTag(TAG_SKY_PLOT).fetchSemanticsNode()
+        val navTop = rule.onNodeWithTag("nav-STATUS").fetchSemanticsNode().positionInRoot.y
+        assertTrue("スカイプロットの下端がボタンより上", sky.positionInRoot.y + sky.size.height <= navTop)
+        val layout = skyLayout(sky.size.width.toFloat(), sky.size.height.toFloat(), SKY_MARGIN_DP * density)
+        val halfLabel = 10f * density
+        for (deg in listOf(0f, 90f, 180f, 270f)) {
+            val p = skyRimPosition(deg, layout, SKY_RIM_GAP_DP * density, heading)
+            assertTrue("x=${p.x} heading=$heading deg=$deg", p.x - halfLabel >= 0f && p.x + halfLabel <= sky.size.width)
+            assertTrue("y=${p.y} heading=$heading deg=$deg", p.y - halfLabel >= 0f && p.y + halfLabel <= sky.size.height)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h700dp-xxhdpi")
+    fun foldedRimLabelsFitHeadingNorth() = assertRimLabelsFit(0f)
+
+    @Test
+    @Config(qualifiers = "w411dp-h700dp-xxhdpi")
+    fun foldedRimLabelsFitHeadingEast() = assertRimLabelsFit(90f)
+
+    @Test
+    @Config(qualifiers = "w411dp-h700dp-xxhdpi")
+    fun foldedRimLabelsFitHeadingSouth() = assertRimLabelsFit(180f)
+
+    @Test
+    @Config(qualifiers = "w411dp-h700dp-xxhdpi")
+    fun foldedRimLabelsFitHeadingWest() = assertRimLabelsFit(270f)
+
+    @Test
+    @Config(qualifiers = "w841dp-h650dp-xhdpi")
+    fun unfoldedWideRimLabelsFit() = assertRimLabelsFit(90f)
+
+    @Test
+    @Config(qualifiers = "w673dp-h841dp-xhdpi")
+    fun unfoldedPortraitRimLabelsFit() = assertRimLabelsFit(180f)
 
     @Test
     fun narrowFitDecision() {

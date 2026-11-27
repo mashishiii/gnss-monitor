@@ -45,6 +45,8 @@ class GnssRepository(context: Context) {
     private var latestSatellites: List<SatelliteInfo> = emptyList()
     // 水平精度の履歴（アプリのメモリ上だけ。GNSS を止めたら捨てる）
     private var accuracyHistory: List<Float?> = emptyList()
+    // 進行方向（速度が 1 m/s 未満のあいだは直前の値を保持。GNSS を止めたら捨てる）
+    private var heading: Float? = null
     private var started = false
     private var tickerJob: Job? = null
 
@@ -173,6 +175,7 @@ class GnssRepository(context: Context) {
         tickerJob?.cancel()
         tickerJob = null
         accuracyHistory = emptyList()
+        heading = null
         runCatching { locationManager.removeUpdates(locationListener) }
         runCatching { locationManager.unregisterGnssStatusCallback(gnssCallback) }
     }
@@ -190,7 +193,8 @@ class GnssRepository(context: Context) {
             accuracyHistory,
             position?.accuracyMeters?.takeIf { snapshot.fixState != FixState.NO_FIX },
         )
-        _state.value = snapshot.copy(accuracyHistory = accuracyHistory)
+        heading = nextHeading(heading, position)
+        _state.value = snapshot.copy(accuracyHistory = accuracyHistory, heading = heading)
     }
 
     private companion object {

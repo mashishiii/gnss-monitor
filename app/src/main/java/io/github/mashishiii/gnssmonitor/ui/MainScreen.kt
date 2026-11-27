@@ -38,6 +38,9 @@ import io.github.mashishiii.gnssmonitor.data.TrackFormats
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
 import io.github.mashishiii.gnssmonitor.logging.LoggingService
 import io.github.mashishiii.gnssmonitor.ui.map.MapScreen
+import io.github.mashishiii.gnssmonitor.ui.map.MapSettings
+import io.github.mashishiii.gnssmonitor.data.MapOrientation
+import io.github.mashishiii.gnssmonitor.data.MotionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -149,8 +152,12 @@ internal fun AppContent(
     track: TrackRecorder.State,
     initialScreen: AppScreen = AppScreen.STATUS,
     initialMode: DisplayMode? = null,
+    initialOrientation: MapOrientation? = null,
+    initialMotion: MotionMode? = null,
 ) {
     val context = LocalContext.current
+    // 地図とスカイプロットで共通の向き・動き（端末に保存。既定はヘディングアップ・レトロ）
+    val mapSettings = remember { MapSettings.load(context, initialOrientation, initialMotion) }
     // 昼夜の表示モード（自動/昼/夜）。選んだ値は端末に覚えておく
     val prefs = remember { context.getSharedPreferences("display", Context.MODE_PRIVATE) }
     var mode by rememberSaveable {
@@ -160,7 +167,7 @@ internal fun AppContent(
     GnssMonitorTheme(night = night) {
         SystemBarIcons(night)
         AppScaffold(
-            state, track, initialScreen, mode,
+            state, track, initialScreen, mode, mapSettings,
             onMode = {
                 mode = it
                 prefs.edit().putString("mode", it.name).apply()
@@ -187,6 +194,7 @@ private fun AppScaffold(
     track: TrackRecorder.State,
     initialScreen: AppScreen,
     mode: DisplayMode,
+    mapSettings: MapSettings,
     onMode: (DisplayMode) -> Unit,
 ) {
     val context = LocalContext.current
@@ -250,6 +258,9 @@ private fun AppScaffold(
                     selectedKey = selectedKey,
                     onSelect = { selectedKey = it },
                     modifier = Modifier.fillMaxSize(),
+                    orientation = mapSettings.orientation,
+                    motion = mapSettings.motion,
+                    onToggleOrientation = mapSettings::toggleOrientation,
                 )
                 AppScreen.LIST -> SatelliteListScreen(state, Modifier.fillMaxSize())
                 AppScreen.MAP -> MapScreen(
@@ -260,6 +271,7 @@ private fun AppScaffold(
                     onExportCsv = { csvLauncher.launch("$fileBase.csv") },
                     onExportGpx = { gpxLauncher.launch("$fileBase.gpx") },
                     modifier = Modifier.fillMaxSize(),
+                    settings = mapSettings,
                 )
             }
         }

@@ -3,6 +3,8 @@ package io.github.mashishiii.gnssmonitor.ui.map
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -42,6 +46,20 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.mashishiii.gnssmonitor.data.FixState
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.TrackColorMode
+import io.github.mashishiii.gnssmonitor.data.DisplayPose
+import io.github.mashishiii.gnssmonitor.data.MapOrientation
+import io.github.mashishiii.gnssmonitor.data.MotionMode
+import io.github.mashishiii.gnssmonitor.data.mapRotationFor
+import io.github.mashishiii.gnssmonitor.data.mapRotationUpdate
+import io.github.mashishiii.gnssmonitor.data.markerCenterOffsetPx
+import io.github.mashishiii.gnssmonitor.ui.rememberDisplayPose
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
 import io.github.mashishiii.gnssmonitor.data.formatSpeedAccuracyKmh
 import io.github.mashishiii.gnssmonitor.data.formatVerticalAccuracy
@@ -64,6 +82,8 @@ import org.osmdroid.views.overlay.TilesOverlay
 
 internal const val TAG_MAP = "map"
 internal const val TAG_RECORD_BUTTON = "recordButton"
+internal const val TAG_COMPASS_BADGE = "compassBadge"
+internal const val TAG_MOTION_BUTTON = "motionButton"
 internal const val TAG_TRACK_COLOR_BUTTON = "trackColorButton"
 internal const val MAP_PREFS = "map"
 internal const val KEY_TRACK_COLOR = "trackColor"
@@ -80,8 +100,16 @@ fun MapScreen(
     onExportCsv: () -> Unit,
     onExportGpx: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 測位状況のスカイプロットと共通の向き・動き（保存される設定）。 */
+    settings: MapSettings = MapSettings.inMemory(),
 ) {
     var follow by rememberSaveable { mutableStateOf(true) }
+    // 画面に出す位置・進行方向。レトロは測位ごとにジャンプ、スムーズは補間
+    val target = remember(state.position, state.heading) {
+        state.position?.let { DisplayPose(it.latitude, it.longitude, state.heading) }
+    }
+    val pose = rememberDisplayPose(target, settings.motion)
+    val heading = pose?.heading ?: state.heading
     // 昼夜は画面下の「表示」ボタンで全画面まとめて切り替える
     val night = NavColors.isNight
     // 軌跡の色（衛星数 / 精度）は端末に保存する（表示モードと同じ SharedPreferences）
@@ -97,6 +125,9 @@ fun MapScreen(
                 follow = follow,
                 night = night,
                 colorMode = colorMode,
+                orientation = settings.orientation,
+                pose = pose,
+                heading = heading,
                 onUserMove = { follow = false },
                 modifier = Modifier.fillMaxSize().testTag(TAG_MAP),
             )
@@ -105,6 +136,11 @@ fun MapScreen(
             MapSideButtons(
                 follow = follow,
                 onFollow = { follow = true },
+                orientation = settings.orientation,
+                heading = heading,
+                onToggleOrientation = settings::toggleOrientation,
+                motion = settings.motion,
+                onNextMotion = settings::nextMotion,
                 colorMode = colorMode,
                 onToggleColor = {
                     colorMode = colorMode.next()
@@ -136,11 +172,18 @@ private fun OsmMap(
     follow: Boolean,
     night: Boolean,
     colorMode: TrackColorMode,
+    orientation: MapOrientation,
+    pose: DisplayPose?,
+    heading: Float?,
     onUserMove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
+    // 最後に反映した向きの設定と、現在地マーカーを下げた量（変わったときだけ処理する）
+    val applied = remember { object { var orientation: MapOrientation? = null; var offsetY = 0 } }
+    // 地図の大きさが決まった（変わった）ときも向き・位置を合わせなおす（マーカーを下げる量は高さで決まる）
+    var sizeTick by remember { mutableIntStateOf(0) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
     val trackOverlay = remember { TrackOverlay(density) }
@@ -182,18 +225,48 @@ private fun OsmMap(
 
     AndroidView(
         factory = { mapView },
-        modifier = modifier,
+        modifier = modifier.onSizeChanged { sizeTick++ },
         update = { view ->
+            @Suppress("UNUSED_VARIABLE") val sizeChanged = sizeTick
             view.overlayManager.tilesOverlay.setColorFilter(if (night) TilesOverlay.INVERT_COLORS else null)
             // 夜モードは色反転フィルタが読み込み中の格子にもかかるので、反転後に暗くなる色を指定する
             view.overlayManager.tilesOverlay.loadingBackgroundColor = if (night) 0xFFF0E8DF.toInt() else 0xFFE6E6E6.toInt()
             view.overlayManager.tilesOverlay.loadingLineColor = if (night) 0xFFE3D7CA.toInt() else 0xFFCCCCCC.toInt()
             trackOverlay.points = track.points
             trackOverlay.colorMode = colorMode
-            positionOverlay.position = state.position
             val p = state.position
+            // スムーズなら補間した位置にマーカーを置く（レトロは最新の測位そのもの）
+            positionOverlay.position = if (p != null && pose != null) p.copy(latitude = pose.latitude, longitude = pose.longitude) else p
+
+            // 地図の向き: 追従中は設定どおり（レトロは測位ごとに一度に合わせる）。追従オフなら外した瞬間の角度のまま。
+            // 向きの設定を切り替えた直後だけは、追従オフでも一度だけ合わせる
+            val orientationChanged = applied.orientation != orientation
+            applied.orientation = orientation
+            val rotation = if (orientationChanged) {
+                mapRotationFor(orientation, heading)
+            } else {
+                mapRotationUpdate(follow, orientation, heading, view.mapOrientation)
+            }
+            if (rotation != view.mapOrientation) view.setMapOrientation(rotation, false)
+
+            // ヘディングアップで追従中は、現在地を中央より下（高さの下から約 35%）に置く。追従オフのときは中央に戻す。
+            // 戻すときは、見えている地図が動かないように、いま画面中央にある地点を中心にしなおす
+            val offsetY = markerCenterOffsetPx(orientation, heading, follow, view.height)
+            if (offsetY != applied.offsetY) {
+                if (offsetY == 0 && view.width > 0 && view.height > 0) {
+                    val keep = view.projection.fromPixels(view.width / 2, view.height / 2) as? GeoPoint
+                    view.setMapCenterOffset(0, 0)
+                    keep?.let { view.controller.setCenter(it) }
+                } else {
+                    view.setMapCenterOffset(0, offsetY)
+                }
+                applied.offsetY = offsetY
+            }
+
             if (follow && p != null) {
-                view.controller.animateTo(GeoPoint(p.latitude, p.longitude))
+                // アニメーションはかけない: レトロは 1 秒ごとのジャンプ、スムーズは補間した位置を毎フレーム渡す
+                val at = pose ?: DisplayPose(p.latitude, p.longitude, heading)
+                view.controller.setCenter(GeoPoint(at.latitude, at.longitude))
             } else if (p == null && follow && track.points.isNotEmpty()) {
                 val last = track.points.last()
                 view.controller.setCenter(GeoPoint(last.latitude, last.longitude))
@@ -293,31 +366,73 @@ private fun LegendLine(color: Color, mark: String, label: String) {
 private fun MapSideButtons(
     follow: Boolean,
     onFollow: () -> Unit,
+    orientation: MapOrientation,
+    heading: Float?,
+    onToggleOrientation: () -> Unit,
+    motion: MotionMode,
+    onNextMotion: () -> Unit,
     colorMode: TrackColorMode,
     onToggleColor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.End) {
-        // 地図は常に北が上
-        Box(Modifier.size(40.dp).dial(), contentAlignment = Alignment.Center) {
-            // 北が上の方位マーク（赤い針が北）
-            Canvas(Modifier.fillMaxSize()) {
-                val c = Offset(size.width / 2f, size.height / 2f)
-                val r = size.minDimension / 2f
-                val north = Path().apply {
-                    moveTo(c.x, c.y - r * 0.78f); lineTo(c.x + r * 0.22f, c.y); lineTo(c.x - r * 0.22f, c.y); close()
-                }
-                val south = Path().apply {
-                    moveTo(c.x, c.y + r * 0.78f); lineTo(c.x + r * 0.22f, c.y); lineTo(c.x - r * 0.22f, c.y); close()
-                }
-                drawPath(south, Color(0xFF8B949E))
-                drawPath(north, Color(0xFFE5392F))
-            }
-            Text("N", color = NavColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 9.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 1.dp))
-        }
+        // 方位バッジ: タップでノースアップ ⇄ ヘディングアップ（測位状況のスカイプロットと共通）。
+        // バッジは直立のまま、赤い針と「N」が真北の方向を指す
+        CompassBadge(mapRotationFor(orientation, heading), orientation, onToggleOrientation)
         NavButton(if (follow) "追従中" else "現在地", on = follow, onClick = onFollow)
         // 軌跡の色の付け方を切り替える（衛星数 ⇄ 精度）
         NavButton("色: ${colorMode.label}", on = colorMode == TrackColorMode.ACCURACY, onClick = onToggleColor, modifier = Modifier.testTag(TAG_TRACK_COLOR_BUTTON))
+        // 地図の動き: レトロ（1 秒ごとのジャンプ）⇄ スムーズ（補間）
+        NavButton("動き: ${motion.label}", on = motion == MotionMode.SMOOTH, onClick = onNextMotion, modifier = Modifier.testTag(TAG_MOTION_BUTTON))
+    }
+}
+
+/** 北の方向（画面上の角度 [northScreenDegrees]、時計回り）を指す方位バッジ。ノースアップなら針は上。 */
+@Composable
+private fun CompassBadge(northScreenDegrees: Float, orientation: MapOrientation, onClick: () -> Unit) {
+    val measurer = rememberTextMeasurer()
+    val textColor = NavColors.TextPrimary
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            Modifier
+                .size(40.dp)
+                .dial()
+                .testTag(TAG_COMPASS_BADGE)
+                .semantics { contentDescription = "地図の向き: ${orientation.label}（タップで切り替え）" }
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val c = Offset(size.width / 2f, size.height / 2f)
+                val r = size.minDimension / 2f
+                rotate(northScreenDegrees, pivot = c) {
+                    val north = Path().apply {
+                        moveTo(c.x, c.y - r * 0.56f); lineTo(c.x + r * 0.2f, c.y); lineTo(c.x - r * 0.2f, c.y); close()
+                    }
+                    val south = Path().apply {
+                        moveTo(c.x, c.y + r * 0.56f); lineTo(c.x + r * 0.2f, c.y); lineTo(c.x - r * 0.2f, c.y); close()
+                    }
+                    drawPath(south, Color(0xFF8B949E))
+                    drawPath(north, Color(0xFFE5392F))
+                }
+                // 「N」は針の先の外側に、文字は回さず直立
+                val rad = Math.toRadians(northScreenDegrees.toDouble())
+                val nx = c.x + (r * 0.78f * kotlin.math.sin(rad)).toFloat()
+                val ny = c.y - (r * 0.78f * kotlin.math.cos(rad)).toFloat()
+                val layout = measurer.measure("N", TextStyle(color = textColor, fontWeight = FontWeight.Bold, fontSize = 9.sp), maxLines = 1)
+                drawText(layout, topLeft = Offset(nx - layout.size.width / 2f, ny - layout.size.height / 2f))
+            }
+        }
+        Text(
+            if (orientation == MapOrientation.HEADING_UP) "進行方向が上" else "北が上",
+            color = NavColors.TextPrimary,
+            fontSize = 8.sp,
+            lineHeight = 10.sp,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .background(NavColors.OverlayBg, RoundedCornerShape(4.dp))
+                .padding(horizontal = 3.dp),
+        )
     }
 }
 

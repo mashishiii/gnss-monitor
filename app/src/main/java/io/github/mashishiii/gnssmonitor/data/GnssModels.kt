@@ -53,6 +53,8 @@ data class GnssUiState(
     val satellites: List<SatelliteInfo> = emptyList(),
     /** 直近の水平精度（m、約 68%）の履歴。古い順で 1 秒 1 点、最大 [ACCURACY_HISTORY_SIZE] 点。値が無い秒は null。 */
     val accuracyHistory: List<Float?> = emptyList(),
+    /** 進行方向（度、真北から時計回り）。GNSS の対地コースを速度 1 m/s 以上で更新し、遅いときは保持。一度も取れていなければ null。 */
+    val heading: Float? = null,
 ) {
     // 多周波（L1 + L5 など）の端末では同じ衛星が周波数ごとに複数行で届くので、衛星単位で数える
     val capturedCount: Int get() = satellites.distinctBy { it.constellationType to it.svid }.size
