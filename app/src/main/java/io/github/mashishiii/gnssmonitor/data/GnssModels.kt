@@ -34,6 +34,10 @@ data class PositionInfo(
     val altitudeMeters: Double? = null,
     /** 測位時刻（Unix ミリ秒、GNSS の時刻）。 */
     val timeMillis: Long? = null,
+    /** 対地速度（m/s）。 */
+    val speedMps: Float? = null,
+    /** 進行方向（度、北=0）。 */
+    val bearingDegrees: Float? = null,
 )
 
 /** 画面に出す 1 秒ごとのスナップショット。 */

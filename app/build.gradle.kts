@@ -4,7 +4,7 @@ plugins {
 }
 
 // リリースビルドのバージョンは CI からタグ名を渡す: -PversionName=0.1.0 -PversionCode=12
-val appVersionName = providers.gradleProperty("versionName").getOrElse("0.2.0-dev")
+val appVersionName = providers.gradleProperty("versionName").getOrElse("0.3.0-dev")
 val appVersionCode = providers.gradleProperty("versionCode").map { it.toInt() }.getOrElse(1)
 
 // 署名情報は環境変数から読む。未設定ならリリースは未署名のまま（ローカルや PR のビルドを止めない）
@@ -59,6 +59,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -76,6 +77,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.osmdroid.android)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(libs.junit)

@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -83,11 +85,21 @@ fun StatusScreen(
             if (maxWidth >= WideThreshold) {
                 WideLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
             } else {
-                NarrowLayout(state, sats, selected, onSelect)
+                NarrowLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
             }
         }
     }
 }
+
+/**
+ * 縦長画面でスカイプロット以外（凡例・詳細・強度バー・情報ボックス）に必要な高さの目安。
+ * 残りが [NarrowMinSky] 以上あれば、スクロールなしで全部が見えるようにスカイプロットを縮める。
+ */
+private val NarrowReservedHeight = 370.dp
+private val NarrowMinSky = 200.dp
+
+/** スクロールなしで収める配置にできるか。 */
+internal fun narrowFitsWithoutScroll(maxHeight: Dp): Boolean = maxHeight - NarrowReservedHeight >= NarrowMinSky
 
 @Composable
 private fun NarrowLayout(
@@ -95,13 +107,35 @@ private fun NarrowLayout(
     sats: List<MergedSatellite>,
     selected: MergedSatellite?,
     onSelect: (String?) -> Unit,
+    maxWidth: Dp,
+    maxHeight: Dp,
 ) {
-    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-        SkyPlot(sats, selected?.key, onSelect, Modifier.fillMaxWidth().aspectRatio(1f).testTag(TAG_SKY_PLOT))
-        SkyLegend()
-        Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
-        SignalBars(sats, selected?.key, onSelect)
-        InfoRows(state, Modifier.padding(top = 8.dp))
+    if (narrowFitsWithoutScroll(maxHeight)) {
+        // スカイプロットが残りの高さを使う（下のボタンと重ならず、凡例・高度まで一画面に収まる）
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                SkyPlot(
+                    sats, selected?.key, onSelect,
+                    Modifier.fillMaxHeight().aspectRatio(1f, matchHeightConstraintsFirst = true).testTag(TAG_SKY_PLOT),
+                )
+            }
+            SkyLegend()
+            Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            SignalBars(sats, selected?.key, onSelect, barHeight = 112.dp)
+            InfoRows(state, Modifier.padding(top = 4.dp))
+        }
+    } else {
+        // 高さが足りない（横向きのスマホなど）ときはスクロール
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            SkyPlot(sats, selected?.key, onSelect, Modifier.size(minOf(maxWidth, 320.dp)).testTag(TAG_SKY_PLOT))
+            SkyLegend()
+            Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
+            SignalBars(sats, selected?.key, onSelect, barHeight = 112.dp)
+            InfoRows(state, Modifier.padding(top = 4.dp))
+        }
     }
 }
 
@@ -380,6 +414,7 @@ internal fun SignalBars(
     selectedKey: String?,
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    barHeight: Dp = 130.dp,
 ) {
     val measurer = rememberTextMeasurer()
     val currentSats by rememberUpdatedState(sats)
@@ -401,7 +436,7 @@ internal fun SignalBars(
                     Modifier
                         .testTag(TAG_SIGNAL_BARS)
                         .width(maxOf(contentWidth, available))
-                        .height(130.dp)
+                        .height(barHeight)
                         .pointerInput(Unit) {
                             detectTapGestures { tap ->
                                 val slot = slotDp.toPx()

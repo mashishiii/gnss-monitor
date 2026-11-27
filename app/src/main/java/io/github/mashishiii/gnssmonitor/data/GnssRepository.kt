@@ -58,6 +58,8 @@ class GnssRepository(context: Context) {
                     accuracyMeters = if (location.hasAccuracy()) location.accuracy.takeIf { it.isFinite() } else null,
                     altitudeMeters = if (location.hasAltitude()) location.altitude.takeIf { it.isFinite() } else null,
                     timeMillis = location.time.takeIf { it > 0L },
+                    speedMps = if (location.hasSpeed()) location.speed.takeIf { it.isFinite() && it >= 0f } else null,
+                    bearingDegrees = if (location.hasBearing()) location.bearing.takeIf { it.isFinite() } else null,
                 )
                 latestPositionAtMs = SystemClock.elapsedRealtime()
             }
@@ -103,13 +105,28 @@ class GnssRepository(context: Context) {
         },
     )
 
+    // 画面（UI）と記録サービスの両方から使うので、利用者がいる間だけ GNSS を動かす
+    private val owners = mutableSetOf<String>()
+
+    /** [owner] として利用を開始する。最初の利用者で GNSS を開始する。メインスレッドから呼ぶ。 */
+    fun acquire(owner: String) {
+        owners += owner
+        start()
+    }
+
+    /** [owner] の利用を終える。利用者がいなくなれば GNSS を止める。 */
+    fun release(owner: String) {
+        owners -= owner
+        if (owners.isEmpty()) stop()
+    }
+
     fun hasPermission(): Boolean =
         ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_FINE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
     /** 権限があれば更新を開始する。二重呼び出しは無視する。 */
     @SuppressLint("MissingPermission")
-    fun start() {
+    private fun start() {
         if (started || !hasPermission()) return
         // 権限の取り消しや GPS プロバイダ無しの端末で例外になっても、アプリは落とさない
         try {
@@ -137,7 +154,7 @@ class GnssRepository(context: Context) {
         }
     }
 
-    fun stop() {
+    private fun stop() {
         if (!started) return
         started = false
         tickerJob?.cancel()

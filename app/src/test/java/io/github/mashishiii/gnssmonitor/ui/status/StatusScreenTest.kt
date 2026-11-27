@@ -131,7 +131,8 @@ class StatusScreenTest {
         assertEquals(null, selected)
 
         // マーカーの無い場所では何も選ばれない
-        node.performTouchInput { click(Offset(layout.cx, layout.cy)) }
+        val empty = skyPosition(315f, 10f, layout)
+        node.performTouchInput { click(Offset(empty.x, empty.y)) }
         composeRule.waitForIdle()
         assertEquals(null, selected)
     }
