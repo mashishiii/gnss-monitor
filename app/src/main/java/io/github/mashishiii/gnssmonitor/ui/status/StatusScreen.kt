@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextMeasurer
@@ -60,6 +61,10 @@ import io.github.mashishiii.gnssmonitor.data.formatTimeJa
 import io.github.mashishiii.gnssmonitor.data.mergeSatellites
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import io.github.mashishiii.gnssmonitor.ui.theme.constellationColor
+import io.github.mashishiii.gnssmonitor.ui.theme.insetBox
+import io.github.mashishiii.gnssmonitor.ui.theme.lighten
+import io.github.mashishiii.gnssmonitor.ui.theme.panelSurface
+import androidx.compose.ui.graphics.Brush
 import java.util.Locale
 
 /** この幅（dp）以上なら、スカイプロットと受信強度を横並びにする。折りたたみ展開時や横向き用。 */
@@ -95,8 +100,8 @@ fun StatusScreen(
  * 縦長画面でスカイプロット以外（凡例・詳細・強度バー・情報ボックス）に必要な高さの目安。
  * 残りが [NarrowMinSky] 以上あれば、スクロールなしで全部が見えるようにスカイプロットを縮める。
  */
-private val NarrowReservedHeight = 370.dp
-private val NarrowMinSky = 200.dp
+private val NarrowReservedHeight = 354.dp
+private val NarrowMinSky = 180.dp
 
 /** スクロールなしで収める配置にできるか。 */
 internal fun narrowFitsWithoutScroll(maxHeight: Dp): Boolean = maxHeight - NarrowReservedHeight >= NarrowMinSky
@@ -121,7 +126,7 @@ private fun NarrowLayout(
             }
             SkyLegend()
             Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
-            SignalBars(sats, selected?.key, onSelect, barHeight = 112.dp)
+            SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
             InfoRows(state, Modifier.padding(top = 4.dp))
         }
     } else {
@@ -133,7 +138,7 @@ private fun NarrowLayout(
             SkyPlot(sats, selected?.key, onSelect, Modifier.size(minOf(maxWidth, 320.dp)).testTag(TAG_SKY_PLOT))
             SkyLegend()
             Readout(selected, Modifier.padding(horizontal = 8.dp, vertical = 6.dp))
-            SignalBars(sats, selected?.key, onSelect, barHeight = 112.dp)
+            SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
             InfoRows(state, Modifier.padding(top = 4.dp))
         }
     }
@@ -193,8 +198,7 @@ private fun FixStrip(state: GnssUiState, modifier: Modifier = Modifier) {
 private fun StripCell(label: String, value: String, valueColor: Color, modifier: Modifier = Modifier) {
     Column(
         modifier
-            .background(NavColors.Panel, RoundedCornerShape(4.dp))
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(4.dp))
+            .panelSurface(RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(label, color = NavColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
@@ -221,6 +225,10 @@ private fun DrawScope.drawMarker(
     val vertices = markerVertices(shape, r)
     if (vertices == null) {
         drawCircle(fill, r, center)
+        if (fill.alpha > 0.5f) {
+            // 光沢（上側に明るい楕円）
+            drawCircle(Color.White.copy(alpha = 0.22f), r * 0.62f, Offset(center.x, center.y - r * 0.38f))
+        }
         drawCircle(stroke, r, center, style = Stroke(strokeWidth))
     } else {
         val path = Path().apply {
@@ -230,6 +238,11 @@ private fun DrawScope.drawMarker(
             close()
         }
         drawPath(path, fill)
+        if (fill.alpha > 0.5f) {
+            clipPath(path) {
+                drawRect(Color.White.copy(alpha = 0.18f), Offset(center.x - r, center.y - r), androidx.compose.ui.geometry.Size(2 * r, r * 0.9f))
+            }
+        }
         drawPath(path, stroke, style = Stroke(strokeWidth))
     }
 }
@@ -273,8 +286,16 @@ internal fun SkyPlot(
         val r = layout.radius
         val labelStyle = TextStyle(color = NavColors.TextSecondary, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
 
-        drawCircle(NavColors.Panel, r, center)
-        drawCircle(Color(0xFF3B5A78), r, center, style = Stroke(2.dp.toPx()))
+        // 文字盤: 中央が明るく縁が暗い放射グラデーションに、金属風のベゼル（上が明るく下が暗い二重の縁）
+        drawCircle(
+            Brush.radialGradient(listOf(NavColors.DialCenter, NavColors.DialEdge), center = center, radius = r),
+            r, center,
+        )
+        drawCircle(
+            Brush.verticalGradient(listOf(NavColors.BezelLight, NavColors.BezelDark), startY = center.y - r, endY = center.y + r),
+            r + 3.dp.toPx(), center, style = Stroke(4.dp.toPx()),
+        )
+        drawCircle(Color.Black.copy(alpha = if (NavColors.isNight) 0.55f else 0.25f), r - 0.5.dp.toPx(), center, style = Stroke(1.dp.toPx()))
         drawCircle(NavColors.GridLine, elevationRingRadius(30f, layout), center, style = Stroke(1.dp.toPx()))
         drawCircle(NavColors.GridLine, elevationRingRadius(60f, layout), center, style = Stroke(1.dp.toPx()))
         drawLine(NavColors.GridLine, Offset(center.x - r, center.y), Offset(center.x + r, center.y), 1.dp.toPx())
@@ -387,8 +408,7 @@ private fun Readout(sat: MergedSatellite?, modifier: Modifier = Modifier) {
     Box(
         modifier
             .fillMaxWidth()
-            .background(NavColors.Panel, RoundedCornerShape(4.dp))
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(4.dp))
+            .panelSurface(RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         Text(
@@ -470,7 +490,19 @@ internal fun SignalBars(
                         if (sat.key == selectedKey) {
                             drawRect(Color.White.copy(alpha = 0.10f), Offset(cx - slot / 2f, 2.dp.toPx()), androidx.compose.ui.geometry.Size(slot, size.height - 4.dp.toPx()))
                         }
-                        drawRect(markerFill(sat), Offset(cx - barWidth / 2f, base - h), androidx.compose.ui.geometry.Size(barWidth, h))
+                        val fillColor = markerFill(sat)
+                        // 光沢のある棒: 上が明るく下が濃いグラデーションと、左側のハイライト
+                        drawRect(
+                            Brush.verticalGradient(
+                                listOf(lighten(fillColor, 0.35f), fillColor),
+                                startY = base - h, endY = base,
+                            ),
+                            Offset(cx - barWidth / 2f, base - h), androidx.compose.ui.geometry.Size(barWidth, h),
+                        )
+                        drawRect(
+                            Color.White.copy(alpha = 0.28f),
+                            Offset(cx - barWidth / 2f, base - h), androidx.compose.ui.geometry.Size(barWidth * 0.3f, h),
+                        )
                         drawCentered(
                             measurer, cn0.toInt().toString(), Offset(cx, base - h - 7.dp.toPx()),
                             TextStyle(color = NavColors.TextPrimary, fontSize = 8.sp, fontFamily = FontFamily.Monospace),
@@ -508,7 +540,7 @@ private fun InfoRows(state: GnssUiState, modifier: Modifier = Modifier) {
                     maxLines = 1,
                     modifier = Modifier
                         .weight(1f)
-                        .background(NavColors.ValueBox)
+                        .insetBox()
                         .padding(horizontal = 8.dp, vertical = 3.dp),
                 )
             }

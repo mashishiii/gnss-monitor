@@ -5,6 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.isSystemInDarkTheme
 import io.github.mashishiii.gnssmonitor.ui.MainScreen
 import io.github.mashishiii.gnssmonitor.ui.list.GnssViewModel
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
@@ -17,7 +18,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            GnssMonitorTheme {
+            GnssMonitorTheme(night = isSystemInDarkTheme()) {
                 MainScreen(viewModel)
             }
         }

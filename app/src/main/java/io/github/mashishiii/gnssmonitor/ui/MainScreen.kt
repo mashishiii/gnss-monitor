@@ -13,6 +13,20 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import android.app.Activity
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
+import io.github.mashishiii.gnssmonitor.data.gpsLevelFrom
+import io.github.mashishiii.gnssmonitor.ui.theme.DisplayMode
+import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
+import io.github.mashishiii.gnssmonitor.ui.theme.NavButton
+import io.github.mashishiii.gnssmonitor.ui.theme.TitleBar
+import io.github.mashishiii.gnssmonitor.ui.theme.toolbarSurface
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.testTag
@@ -69,10 +83,10 @@ import io.github.mashishiii.gnssmonitor.ui.status.StatusScreen
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 
 /** 下のボタンで切り替える画面。 */
-enum class AppScreen(val label: String) {
-    STATUS("測位状況"),
-    LIST("衛星一覧"),
-    MAP("地図"),
+enum class AppScreen(val label: String, val title: String) {
+    STATUS("測位状況", "GPS情報（測位状況）"),
+    LIST("衛星一覧", "GPS情報（衛星一覧）"),
+    MAP("地図", "現在地マップ"),
 }
 
 @Composable
@@ -132,6 +146,46 @@ internal fun AppContent(
     state: GnssUiState,
     track: TrackRecorder.State,
     initialScreen: AppScreen = AppScreen.STATUS,
+    initialMode: DisplayMode? = null,
+) {
+    val context = LocalContext.current
+    // 昼夜の表示モード（自動/昼/夜）。選んだ値は端末に覚えておく
+    val prefs = remember { context.getSharedPreferences("display", Context.MODE_PRIVATE) }
+    var mode by rememberSaveable {
+        mutableStateOf(initialMode ?: DisplayMode.fromName(prefs.getString("mode", null)))
+    }
+    val night = mode.isNight(isSystemInDarkTheme())
+    GnssMonitorTheme(night = night) {
+        SystemBarIcons(night)
+        AppScaffold(
+            state, track, initialScreen, mode,
+            onMode = {
+                mode = it
+                prefs.edit().putString("mode", it.name).apply()
+            },
+        )
+    }
+}
+
+/** 昼は暗いアイコン、夜は明るいアイコンにして、ステータスバー/ナビゲーションバーの文字を読めるようにする。 */
+@Composable
+private fun SystemBarIcons(night: Boolean) {
+    val view = LocalView.current
+    SideEffect {
+        val window = (view.context as? Activity)?.window ?: return@SideEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !night
+        controller.isAppearanceLightNavigationBars = !night
+    }
+}
+
+@Composable
+private fun AppScaffold(
+    state: GnssUiState,
+    track: TrackRecorder.State,
+    initialScreen: AppScreen,
+    mode: DisplayMode,
+    onMode: (DisplayMode) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -166,7 +220,14 @@ internal fun AppContent(
     Scaffold(
         containerColor = NavColors.Background,
         contentWindowInsets = WindowInsets.safeDrawing,
-        bottomBar = { BottomNav(screen, onSelect = { screen = it }) },
+        topBar = {
+            TitleBar(
+                screen.title,
+                gpsLevelFrom(state.fixState, state.capturedCount),
+                Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            )
+        },
+        bottomBar = { BottomNav(screen, mode, onSelect = { screen = it }, onMode = onMode) },
     ) { innerPadding ->
         // 下のボタンや画面端（ナビゲーションバー・カメラ穴）と重ならないよう、ここで余白を確保する
         Box(
@@ -226,36 +287,38 @@ private suspend fun exportTrack(
     ).show()
 }
 
-/** カーナビ風の下部ボタン。 */
+/** nav-u のような下部ツールバー。画面切り替えの大きな光沢ボタンと、右端の昼夜切り替え（表示切替）。 */
 @Composable
-private fun BottomNav(current: AppScreen, onSelect: (AppScreen) -> Unit) {
+private fun BottomNav(
+    current: AppScreen,
+    mode: DisplayMode,
+    onSelect: (AppScreen) -> Unit,
+    onMode: (DisplayMode) -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(NavColors.Bar)
-            .border(1.dp, NavColors.PanelBorder)
+            .toolbarSurface()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         for (item in AppScreen.entries) {
-            val on = item == current
-            Text(
+            NavButton(
                 item.label,
-                color = NavColors.TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .heightIn(min = 40.dp)
-                    .testTag("nav-${item.name}")
-                    .background(if (on) NavColors.ButtonOn else NavColors.Button, RoundedCornerShape(4.dp))
-                    .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(4.dp))
-                    .clickable { onSelect(item) }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                on = item == current,
+                onClick = { onSelect(item) },
+                modifier = Modifier.weight(1f).testTag("nav-${item.name}"),
             )
         }
+        NavButton(
+            "表示 ${mode.label}",
+            on = false,
+            onClick = { onMode(mode.next()) },
+            modifier = Modifier.weight(0.8f).testTag("nav-DISPLAY"),
+            fontSize = 12,
+        )
     }
 }
 

@@ -42,7 +42,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.mashishiii.gnssmonitor.data.FixState
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
+import io.github.mashishiii.gnssmonitor.ui.theme.NavButton
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
+import io.github.mashishiii.gnssmonitor.ui.theme.dial
+import io.github.mashishiii.gnssmonitor.ui.theme.toolbarSurface
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
 import java.util.Locale
 import kotlinx.coroutines.delay
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -68,7 +74,8 @@ fun MapScreen(
     modifier: Modifier = Modifier,
 ) {
     var follow by rememberSaveable { mutableStateOf(true) }
-    var night by rememberSaveable { mutableStateOf(true) }
+    // 昼夜は画面下の「表示」ボタンで全画面まとめて切り替える
+    val night = NavColors.isNight
 
     Column(modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -84,9 +91,7 @@ fun MapScreen(
             TrackLegend(Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 44.dp))
             MapSideButtons(
                 follow = follow,
-                night = night,
                 onFollow = { follow = true },
-                onNight = { night = !night },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
             SpeedBox(state, Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 24.dp))
@@ -96,7 +101,7 @@ fun MapScreen(
                 fontSize = 9.sp,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .background(NavColors.Background.copy(alpha = 0.7f))
+                    .background(NavColors.OverlayBg)
                     .padding(horizontal = 4.dp, vertical = 1.dp),
             )
         }
@@ -180,14 +185,12 @@ private fun OsmMap(
 
 // ---------------------------------------------------------------- 重ね表示
 
-private val OverlayBg = Color(0xD90A1017)
-
 @Composable
 private fun OverlayBox(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Box(
         modifier
-            .background(OverlayBg, RoundedCornerShape(4.dp))
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(4.dp))
+            .background(NavColors.OverlayBg, RoundedCornerShape(6.dp))
+            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(6.dp))
             .padding(horizontal = 8.dp, vertical = 4.dp),
     ) { content() }
 }
@@ -237,43 +240,29 @@ private fun LegendLine(color: Color, mark: String, label: String) {
 @Composable
 private fun MapSideButtons(
     follow: Boolean,
-    night: Boolean,
     onFollow: () -> Unit,
-    onNight: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.End) {
         // 地図は常に北が上
-        Box(
-            Modifier.size(36.dp).background(Color(0xFFE6C229), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) { Text("N", color = Color(0xFF1B1B1B), fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+        Box(Modifier.size(40.dp).dial(), contentAlignment = Alignment.Center) {
+            // 北が上の方位マーク（赤い針が北）
+            Canvas(Modifier.fillMaxSize()) {
+                val c = Offset(size.width / 2f, size.height / 2f)
+                val r = size.minDimension / 2f
+                val north = Path().apply {
+                    moveTo(c.x, c.y - r * 0.78f); lineTo(c.x + r * 0.22f, c.y); lineTo(c.x - r * 0.22f, c.y); close()
+                }
+                val south = Path().apply {
+                    moveTo(c.x, c.y + r * 0.78f); lineTo(c.x + r * 0.22f, c.y); lineTo(c.x - r * 0.22f, c.y); close()
+                }
+                drawPath(south, Color(0xFF8B949E))
+                drawPath(north, Color(0xFFE5392F))
+            }
+            Text("N", color = NavColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 9.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 1.dp))
+        }
         NavButton(if (follow) "追従中" else "現在地", on = follow, onClick = onFollow)
-        NavButton(if (night) "夜" else "昼", on = false, onClick = onNight)
     }
-}
-
-@Composable
-internal fun NavButton(
-    label: String,
-    on: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    background: Color? = null,
-) {
-    Text(
-        label,
-        color = NavColors.TextPrimary,
-        fontSize = 12.sp,
-        fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-        textAlign = TextAlign.Center,
-        modifier = modifier
-            .heightIn(min = 40.dp)
-            .background(background ?: if (on) NavColors.ButtonOn else NavColors.Button, RoundedCornerShape(4.dp))
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-    )
 }
 
 @Composable
@@ -330,8 +319,7 @@ private fun RecordBar(
     Column(
         Modifier
             .fillMaxWidth()
-            .background(NavColors.Background)
-            .border(1.dp, NavColors.PanelBorder)
+            .toolbarSurface()
             .padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -342,7 +330,7 @@ private fun RecordBar(
                     "■ 記録停止  ${formatElapsed(elapsed)}",
                     on = true,
                     onClick = onStop,
-                    background = Color(0xFFD83A34),
+                    tint = Color(0xFFD83A34),
                     modifier = Modifier.weight(1f).testTag(TAG_RECORD_BUTTON),
                 )
             } else {

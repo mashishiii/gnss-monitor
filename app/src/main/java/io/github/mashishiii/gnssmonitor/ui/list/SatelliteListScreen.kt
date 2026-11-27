@@ -50,6 +50,11 @@ import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.data.SignalClass
 import io.github.mashishiii.gnssmonitor.data.uniqueSatelliteKeys
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
+import io.github.mashishiii.gnssmonitor.ui.theme.glossy
+import io.github.mashishiii.gnssmonitor.ui.theme.insetBox
+import io.github.mashishiii.gnssmonitor.ui.theme.lighten
+import io.github.mashishiii.gnssmonitor.ui.theme.panelSurface
+import androidx.compose.ui.graphics.Brush
 import java.util.Locale
 import kotlin.math.abs
 
@@ -73,9 +78,7 @@ private fun Panel(modifier: Modifier = Modifier, content: @Composable () -> Unit
     Box(
         modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .background(NavColors.Panel)
-            .border(1.dp, NavColors.PanelBorder, RoundedCornerShape(6.dp))
+            .panelSurface(RoundedCornerShape(8.dp))
             .padding(12.dp),
     ) { content() }
 }
@@ -85,7 +88,7 @@ private fun StatusHeader(state: GnssUiState) {
     val fix = state.fixState
     val fixColor = when (fix) {
         FixState.NO_FIX -> NavColors.Warning
-        else -> NavColors.Used
+        else -> NavColors.UsedText
     }
     Panel {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -116,7 +119,13 @@ private fun HeaderRow(label: String, value: @Composable () -> Unit) {
 
 @Composable
 private fun Mono(text: String) {
-    Text(text, color = NavColors.TextPrimary, fontFamily = FontFamily.Monospace, fontSize = 15.sp)
+    Text(
+        text,
+        color = NavColors.TextPrimary,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 15.sp,
+        modifier = Modifier.insetBox().padding(horizontal = 8.dp, vertical = 2.dp),
+    )
 }
 
 private val ColName = 76.dp
@@ -141,8 +150,8 @@ internal fun SatelliteList(satellites: List<SatelliteInfo>, modifier: Modifier =
                 // 測位系 + SVID だけでは重複する（多周波端末で同じ衛星が複数行届く）ため、一意なキーを作る
                 val keys = remember(satellites) { uniqueSatelliteKeys(satellites) }
                 LazyColumn {
-                    itemsIndexed(satellites, key = { index, _ -> keys.getOrElse(index) { "idx-$index" } }) { _, sat ->
-                        SatelliteRow(sat)
+                    itemsIndexed(satellites, key = { index, _ -> keys.getOrElse(index) { "idx-$index" } }) { index, sat ->
+                        SatelliteRow(sat, zebra = index % 2 == 1)
                     }
                 }
             }
@@ -155,7 +164,9 @@ private fun ListHeader() {
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(bottom = 6.dp),
+            .padding(bottom = 6.dp)
+            .glossy(RoundedCornerShape(4.dp), NavColors.TitleTop, NavColors.TitleBottom, rim = false)
+            .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         HeaderCell("測位系", Modifier.width(ColName))
@@ -170,16 +181,18 @@ private fun ListHeader() {
 
 @Composable
 private fun HeaderCell(text: String, modifier: Modifier, align: TextAlign = TextAlign.Start) {
-    Text(text, color = NavColors.TextSecondary, fontSize = 11.sp, textAlign = align, modifier = modifier, maxLines = 1)
+    Text(text, color = NavColors.OnTitle, fontSize = 11.sp, fontWeight = FontWeight.Bold, textAlign = align, modifier = modifier, maxLines = 1)
 }
 
 @Composable
-private fun SatelliteRow(sat: SatelliteInfo) {
+private fun SatelliteRow(sat: SatelliteInfo, zebra: Boolean = false) {
     val color = signalColor(sat.signalClass)
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 5.dp),
+            // 1 行おきに薄く色を付けて、行を目で追いやすくする（nav-u のリスト風）
+            .background(if (zebra) NavColors.GridLine.copy(alpha = 0.35f) else androidx.compose.ui.graphics.Color.Transparent)
+            .padding(horizontal = 4.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(sat.constellationName, color = NavColors.TextPrimary, fontSize = 13.sp, modifier = Modifier.width(ColName), maxLines = 1)
@@ -213,14 +226,14 @@ private fun SignalBar(cn0DbHz: Float, color: Color, modifier: Modifier = Modifie
     Box(
         modifier
             .height(10.dp)
-            .clip(RoundedCornerShape(2.dp))
-            .background(NavColors.GridLine),
+            .clip(RoundedCornerShape(3.dp))
+            .insetBox(),
     ) {
         Box(
             Modifier
                 .fillMaxHeight()
                 .fillMaxWidth(fraction)
-                .background(color),
+                .background(Brush.verticalGradient(listOf(lighten(color, 0.4f), color))),
         )
     }
 }

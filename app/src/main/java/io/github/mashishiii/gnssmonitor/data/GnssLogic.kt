@@ -95,3 +95,19 @@ fun formatTimeJa(millis: Long, timeZone: java.util.TimeZone = java.util.TimeZone
     java.text.SimpleDateFormat("HH時mm分ss秒", java.util.Locale.JAPAN)
         .apply { this.timeZone = timeZone }
         .format(java.util.Date(millis))
+
+/**
+ * nav-u の自車マークの色に倣った受信レベル。
+ * 赤 = 測位できている / 橙 = 衛星は捕捉しているが測位前 / 灰 = 衛星を受信できていない。
+ */
+enum class GpsLevel(val label: String) {
+    FIX("測位中"),
+    ACQUIRING("捕捉中"),
+    NONE("未受信"),
+}
+
+fun gpsLevelFrom(fixState: FixState, capturedCount: Int): GpsLevel = when {
+    fixState != FixState.NO_FIX -> GpsLevel.FIX
+    capturedCount > 0 -> GpsLevel.ACQUIRING
+    else -> GpsLevel.NONE
+}
