@@ -9,6 +9,10 @@ import io.github.mashishiii.gnssmonitor.data.GnssUiState
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
+import io.github.mashishiii.gnssmonitor.ui.status.TAG_BAND_CHIPS
+import io.github.mashishiii.gnssmonitor.ui.status.TAG_CONSTELLATION_STATS
+import io.github.mashishiii.gnssmonitor.ui.status.TAG_INFO_PANEL
+import io.github.mashishiii.gnssmonitor.ui.status.TAG_SPARKLINE
 import io.github.mashishiii.gnssmonitor.ui.status.narrowFitsWithoutScroll
 import androidx.compose.ui.test.performScrollTo
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
@@ -35,7 +39,7 @@ class LayoutInsetsTest {
         rule.setContent { GnssMonitorTheme { AppContent(state, TrackRecorder.State()) } }
         rule.waitForIdle()
         if (scrollFirst) {
-            rule.onNodeWithText("高度").performScrollTo()
+            rule.onNodeWithTag(TAG_INFO_PANEL).performScrollTo()
             rule.waitForIdle()
         }
         // boundsInRoot はスクロール領域で切り取られるので、切り取り前の位置（positionInRoot + size）で比べる
@@ -46,6 +50,13 @@ class LayoutInsetsTest {
         val navTop = rule.onNodeWithTag("nav-STATUS").fetchSemanticsNode().positionInRoot.y
         assertTrue("高度の行 ${bottomOf("高度")} がボタン $navTop より上", bottomOf("高度") <= navTop)
         assertTrue("凡例 ${bottomOf("BeiDou")} がボタン $navTop より上", bottomOf("BeiDou") <= navTop)
+        // v0.5 の内訳（帯域チップ・測位系ごとの貢献・精度の履歴・平均 C/N0）もボタンに重ならない
+        for (tag in listOf(TAG_BAND_CHIPS, TAG_SPARKLINE, TAG_CONSTELLATION_STATS, TAG_INFO_PANEL)) {
+            val n = rule.onNodeWithTag(tag).fetchSemanticsNode()
+            val bottom = n.positionInRoot.y + n.size.height
+            assertTrue("$tag の下端 $bottom がボタン $navTop より上", bottom <= navTop)
+        }
+        assertTrue("平均 C/N0 ${bottomOf("平均C/N0")} がボタン $navTop より上", bottomOf("平均C/N0") <= navTop)
     }
 
     /** Pixel Fold 折りたたみ時（外画面・縦）でステータスバー等を除いた高さ相当。v0.2 ではここで重なっていた。 */

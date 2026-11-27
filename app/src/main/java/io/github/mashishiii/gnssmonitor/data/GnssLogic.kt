@@ -35,16 +35,14 @@ fun classifySignal(usedInFix: Boolean, cn0DbHz: Float): SignalClass = when {
     else -> SignalClass.WEAK
 }
 
-/** 搬送波周波数（Hz）から帯域の目安を返す。 */
+/**
+ * 搬送波周波数（Hz）から帯域族の名前を返す（L1 / L5 / E5b / L2 / G2 / B3 / E6）。
+ * 周波数が無ければ空文字、範囲外は "-"。測位系ごとの呼び名（E5a / B2a など）は [bandLabelFor]。
+ */
 fun bandLabel(carrierFrequencyHz: Float?): String {
     if (carrierFrequencyHz == null || !carrierFrequencyHz.isFinite() || carrierFrequencyHz <= 0f) return ""
-    val mhz = carrierFrequencyHz / 1_000_000f
-    return when {
-        mhz in 1550f..1620f -> "L1"
-        mhz in 1160f..1195f -> "L5"
-        mhz in 1195f..1270f -> "L2"
-        else -> "-"
-    }
+    val family = bandFamily(carrierFrequencyHz)
+    return if (family == BandFamily.UNKNOWN) "-" else family.label
 }
 
 /**
@@ -162,3 +160,11 @@ fun formatSpeedKmh(speedMps: Float?): String {
     val v = speedMps?.takeIf { it.isFinite() && it >= 0f } ?: return "---"
     return String.format(java.util.Locale.US, "%.0f km/h", v * 3.6f)
 }
+
+/** 垂直精度（m）。取れないときは「---」。 */
+fun formatVerticalAccuracy(meters: Float?): String =
+    meters?.takeIf { it.isFinite() && it >= 0f }?.let { String.format(java.util.Locale.US, "±%.1f m", it) } ?: "---"
+
+/** 速度精度（m/s → km/h）。取れないときは「---」。 */
+fun formatSpeedAccuracyKmh(mps: Float?): String =
+    mps?.takeIf { it.isFinite() && it >= 0f }?.let { String.format(java.util.Locale.US, "±%.1f km/h", it * 3.6f) } ?: "---"

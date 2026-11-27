@@ -10,7 +10,10 @@ import android.view.MotionEvent
 import io.github.mashishiii.gnssmonitor.BuildConfig
 import io.github.mashishiii.gnssmonitor.data.LogPoint
 import io.github.mashishiii.gnssmonitor.data.PositionInfo
+import io.github.mashishiii.gnssmonitor.data.TrackColorMode
 import io.github.mashishiii.gnssmonitor.data.TrackQuality
+import io.github.mashishiii.gnssmonitor.data.ACCURACY_95_FACTOR
+import io.github.mashishiii.gnssmonitor.data.accuracyQuality
 import io.github.mashishiii.gnssmonitor.data.isTrackGap
 import io.github.mashishiii.gnssmonitor.data.trackQuality
 import java.io.File
@@ -68,9 +71,29 @@ object TrackColors {
     }
 }
 
-/** 使用衛星数で色分けした軌跡。間が空いた区間は点線。 */
+/** 精度の円の線の色と、その背景になる地図タイルの代表色（コントラスト確認用）。 */
+object AccuracyCircleColors {
+    const val STROKE = 0xFFD83A34.toInt()
+    /** OSM 標準タイルの地の色（昼）。 */
+    const val DAY_TILE = 0xFFF2EFE9.toInt()
+    /** 夜は色反転フィルタをかけるので、昼の地の色の反転。 */
+    const val NIGHT_TILE = 0xFF0D1016.toInt()
+}
+
+/** 精度の円の描き方。半径が画面を大きくはみ出すときは、地図を埋め尽くさないよう輪郭だけ・描かない。 */
+enum class CircleDrawMode { FILLED, OUTLINE, HIDDEN }
+
+fun circleDrawMode(radiusPx: Float, viewMaxPx: Float, minPx: Float): CircleDrawMode = when {
+    !radiusPx.isFinite() || radiusPx <= minPx -> CircleDrawMode.HIDDEN
+    viewMaxPx <= 0f || radiusPx <= viewMaxPx -> CircleDrawMode.FILLED
+    radiusPx <= viewMaxPx * 8f -> CircleDrawMode.OUTLINE
+    else -> CircleDrawMode.HIDDEN
+}
+
+/** 軌跡を色分けした線。既定は使用衛星数、切り替えで水平精度 (68%)。間が空いた区間は点線。 */
 class TrackOverlay(private val density: Float) : Overlay() {
     var points: List<LogPoint> = emptyList()
+    var colorMode: TrackColorMode = TrackColorMode.SATELLITES
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -107,7 +130,12 @@ class TrackOverlay(private val density: Float) : Overlay() {
                 path = Path().apply { moveTo(b.x.toFloat(), b.y.toFloat()) }
                 currentColor = 0
             } else {
-                val color = TrackColors.of(trackQuality(next.satellitesUsed))
+                val color = TrackColors.of(
+                    when (colorMode) {
+                        TrackColorMode.SATELLITES -> trackQuality(next.satellitesUsed)
+                        TrackColorMode.ACCURACY -> accuracyQuality(next.accuracyMeters)
+                    },
+                )
                 if (currentColor != 0 && color != currentColor) {
                     paint.color = currentColor
                     canvas.drawPath(path, paint)
@@ -125,13 +153,17 @@ class TrackOverlay(private val density: Float) : Overlay() {
     }
 }
 
-/** 現在地（精度の円と、カーナビ風の赤い矢印。止まっているときは丸）。 */
+/** 現在地（精度の円 2 つ — 68% は塗り + 実線、95% 目安は破線 — と、カーナビ風の赤い矢印。止まっているときは丸）。 */
 class PositionOverlay(private val density: Float) : Overlay() {
     var position: PositionInfo? = null
 
     private val accuracyFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x33D83A34; style = Paint.Style.FILL }
     private val accuracyStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = 0x88D83A34.toInt(); style = Paint.Style.STROKE; strokeWidth = 1f * density
+    }
+    private val accuracy95Stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AccuracyCircleColors.STROKE; style = Paint.Style.STROKE; strokeWidth = 1.5f * density
+        pathEffect = DashPathEffect(floatArrayOf(6f * density, 5f * density), 0f)
     }
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFD83A34.toInt(); style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -145,10 +177,20 @@ class PositionOverlay(private val density: Float) : Overlay() {
         val x = pt.x.toFloat()
         val y = pt.y.toFloat()
         p.accuracyMeters?.let { acc ->
+            val viewMax = maxOf(canvas.width, canvas.height).toFloat()
             val r = projection.metersToPixels(acc, p.latitude, projection.zoomLevel)
-            if (r > 4f * density) {
-                canvas.drawCircle(x, y, r, accuracyFill)
-                canvas.drawCircle(x, y, r, accuracyStroke)
+            when (circleDrawMode(r, viewMax, 4f * density)) {
+                CircleDrawMode.FILLED -> {
+                    canvas.drawCircle(x, y, r, accuracyFill)
+                    canvas.drawCircle(x, y, r, accuracyStroke)
+                }
+                CircleDrawMode.OUTLINE -> canvas.drawCircle(x, y, r, accuracyStroke)
+                CircleDrawMode.HIDDEN -> Unit
+            }
+            // 95% の目安（68% 半径 × ACCURACY_95_FACTOR）は破線の輪郭だけ
+            val r95 = r * ACCURACY_95_FACTOR
+            if (circleDrawMode(r95, viewMax, 4f * density) != CircleDrawMode.HIDDEN) {
+                canvas.drawCircle(x, y, r95, accuracy95Stroke)
             }
         }
         val bearing = p.bearingDegrees

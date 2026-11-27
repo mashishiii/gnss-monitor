@@ -41,7 +41,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.mashishiii.gnssmonitor.data.FixState
 import io.github.mashishiii.gnssmonitor.data.GnssUiState
+import io.github.mashishiii.gnssmonitor.data.TrackColorMode
 import io.github.mashishiii.gnssmonitor.data.TrackRecorder
+import io.github.mashishiii.gnssmonitor.data.formatSpeedAccuracyKmh
+import io.github.mashishiii.gnssmonitor.data.formatVerticalAccuracy
+import io.github.mashishiii.gnssmonitor.data.horizontalAccuracy95
+import io.github.mashishiii.gnssmonitor.data.ACCURACY_95_FACTOR
 import io.github.mashishiii.gnssmonitor.ui.theme.NavButton
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import io.github.mashishiii.gnssmonitor.ui.theme.dial
@@ -59,6 +64,9 @@ import org.osmdroid.views.overlay.TilesOverlay
 
 internal const val TAG_MAP = "map"
 internal const val TAG_RECORD_BUTTON = "recordButton"
+internal const val TAG_TRACK_COLOR_BUTTON = "trackColorButton"
+internal const val MAP_PREFS = "map"
+internal const val KEY_TRACK_COLOR = "trackColor"
 
 /** 地図の初期位置（測位前）: 東京駅付近。 */
 private val DefaultCenter = GeoPoint(35.681236, 139.767125)
@@ -76,6 +84,10 @@ fun MapScreen(
     var follow by rememberSaveable { mutableStateOf(true) }
     // 昼夜は画面下の「表示」ボタンで全画面まとめて切り替える
     val night = NavColors.isNight
+    // 軌跡の色（衛星数 / 精度）は端末に保存する（表示モードと同じ SharedPreferences）
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(MAP_PREFS, android.content.Context.MODE_PRIVATE) }
+    var colorMode by remember { mutableStateOf(TrackColorMode.fromName(prefs.getString(KEY_TRACK_COLOR, null))) }
 
     Column(modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -84,14 +96,20 @@ fun MapScreen(
                 track = track,
                 follow = follow,
                 night = night,
+                colorMode = colorMode,
                 onUserMove = { follow = false },
                 modifier = Modifier.fillMaxSize().testTag(TAG_MAP),
             )
             MapStatusBox(state, Modifier.align(Alignment.TopStart).padding(8.dp))
-            TrackLegend(Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 44.dp))
+            TrackLegend(colorMode, Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 68.dp))
             MapSideButtons(
                 follow = follow,
                 onFollow = { follow = true },
+                colorMode = colorMode,
+                onToggleColor = {
+                    colorMode = colorMode.next()
+                    prefs.edit().putString(KEY_TRACK_COLOR, colorMode.name).apply()
+                },
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             )
             SpeedBox(state, Modifier.align(Alignment.BottomStart).padding(start = 8.dp, bottom = 24.dp))
@@ -117,6 +135,7 @@ private fun OsmMap(
     track: TrackRecorder.State,
     follow: Boolean,
     night: Boolean,
+    colorMode: TrackColorMode,
     onUserMove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -170,6 +189,7 @@ private fun OsmMap(
             view.overlayManager.tilesOverlay.loadingBackgroundColor = if (night) 0xFFF0E8DF.toInt() else 0xFFE6E6E6.toInt()
             view.overlayManager.tilesOverlay.loadingLineColor = if (night) 0xFFE3D7CA.toInt() else 0xFFCCCCCC.toInt()
             trackOverlay.points = track.points
+            trackOverlay.colorMode = colorMode
             positionOverlay.position = state.position
             val p = state.position
             if (follow && p != null) {
@@ -198,33 +218,65 @@ private fun OverlayBox(modifier: Modifier = Modifier, content: @Composable () ->
 @Composable
 private fun MapStatusBox(state: GnssUiState, modifier: Modifier = Modifier) {
     val fix = state.fixState
-    val acc = state.position?.accuracyMeters?.takeIf { fix != FixState.NO_FIX }
+    val p = state.position?.takeIf { fix != FixState.NO_FIX }
+    val acc = p?.accuracyMeters
     OverlayBox(modifier) {
-        Row {
-            Text(
-                fix.label,
-                color = if (fix == FixState.NO_FIX) NavColors.Warning else NavColors.TextPrimary,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-            )
-            Text(
-                " ${state.usedCount}/${state.capturedCount}衛星" + (acc?.let { String.format(Locale.US, " ±%.1fm", it) } ?: ""),
-                color = NavColors.TextPrimary,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-            )
+        Column {
+            Row {
+                Text(
+                    fix.label,
+                    color = if (fix == FixState.NO_FIX) NavColors.Warning else NavColors.TextPrimary,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                )
+                Text(
+                    " ${state.usedCount}/${state.capturedCount}衛星" + (acc?.let { String.format(Locale.US, " ±%.1fm", it) } ?: ""),
+                    color = NavColors.TextPrimary,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 12.sp,
+                )
+            }
+            if (acc != null) {
+                // 水平精度 (68%) は上の ±、その下に 95% の目安（×1.62）と、取れていれば垂直精度
+                Text(
+                    "68% ${String.format(Locale.US, "%.1f", acc)}m  95%目安 ${String.format(Locale.US, "%.1f", horizontalAccuracy95(acc))}m",
+                    color = NavColors.TextSecondary,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                )
+                p.verticalAccuracyMeters?.let {
+                    Text(
+                        "垂直 ${formatVerticalAccuracy(it)}",
+                        color = NavColors.TextSecondary,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp,
+                        lineHeight = 11.sp,
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun TrackLegend(modifier: Modifier = Modifier) {
+private fun TrackLegend(mode: TrackColorMode, modifier: Modifier = Modifier) {
     OverlayBox(modifier) {
         Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            LegendLine(Color(TrackColors.GOOD), "━", "8衛星以上")
-            LegendLine(Color(TrackColors.MID), "━", "5〜7衛星")
-            LegendLine(Color(TrackColors.LOW), "━", "4衛星以下")
+            when (mode) {
+                TrackColorMode.SATELLITES -> {
+                    LegendLine(Color(TrackColors.GOOD), "━", "8衛星以上")
+                    LegendLine(Color(TrackColors.MID), "━", "5〜7衛星")
+                    LegendLine(Color(TrackColors.LOW), "━", "4衛星以下")
+                }
+                TrackColorMode.ACCURACY -> {
+                    LegendLine(Color(TrackColors.GOOD), "━", "精度 5m未満")
+                    LegendLine(Color(TrackColors.MID), "━", "5〜15m")
+                    LegendLine(Color(TrackColors.LOW), "━", "15m超・不明")
+                }
+            }
             LegendLine(Color(TrackColors.LOW), "┅", "測位なし（5秒以上）")
+            LegendLine(NavColors.TextSecondary, "○", "円: 68% 実線 / 95%目安 破線")
         }
     }
 }
@@ -241,6 +293,8 @@ private fun LegendLine(color: Color, mark: String, label: String) {
 private fun MapSideButtons(
     follow: Boolean,
     onFollow: () -> Unit,
+    colorMode: TrackColorMode,
+    onToggleColor: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.End) {
@@ -262,6 +316,8 @@ private fun MapSideButtons(
             Text("N", color = NavColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 9.sp, modifier = Modifier.align(Alignment.TopCenter).padding(top = 1.dp))
         }
         NavButton(if (follow) "追従中" else "現在地", on = follow, onClick = onFollow)
+        // 軌跡の色の付け方を切り替える（衛星数 ⇄ 精度）
+        NavButton("色: ${colorMode.label}", on = colorMode == TrackColorMode.ACCURACY, onClick = onToggleColor, modifier = Modifier.testTag(TAG_TRACK_COLOR_BUTTON))
     }
 }
 
@@ -279,6 +335,14 @@ private fun SpeedBox(state: GnssUiState, modifier: Modifier = Modifier) {
                     fontSize = 24.sp,
                 )
                 Text(" km/h", color = NavColors.TextSecondary, fontSize = 10.sp, modifier = Modifier.padding(bottom = 3.dp))
+            }
+            p?.speedAccuracyMps?.let {
+                Text(
+                    "速度精度 " + formatSpeedAccuracyKmh(it),
+                    color = NavColors.TextSecondary,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                )
             }
             Text(
                 "高度 " + (p?.altitudeMeters?.let { String.format(Locale.US, "%.0f m", it) } ?: "---"),

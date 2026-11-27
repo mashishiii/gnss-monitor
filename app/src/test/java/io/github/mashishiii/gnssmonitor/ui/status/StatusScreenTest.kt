@@ -91,7 +91,14 @@ class StatusScreenTest {
         composeRule.onNodeWithText("緯度").assertExists()
         val rows = statusRows(GnssUiState(position = null, satellites = emptyList()))
         // 日付・時刻・緯度・経度・速度・高度は「---」、測位は未測位、衛星 0 / 0、精度は「---」
-        assertEquals(listOf("---", "---", "---", "---", "---", "---", "未測位", "0 / 0", "---"), rows.map { it.second })
+        // v0.5 の行（平均 C/N0・デュアル周波数・水平精度 68%・95% 目安・垂直精度・速度精度）も「---」
+        assertEquals(
+            listOf("---", "---", "---", "---", "---", "---", "未測位", "0 / 0", "---", "---", "---", "---", "---", "---"),
+            rows.map { it.second },
+        )
+        composeRule.onNodeWithText("水平精度(68%)").assertExists()
+        composeRule.onNodeWithText("平均C/N0").assertExists()
+        composeRule.onNodeWithText("デュアル周波数").assertExists()
         composeRule.onNodeWithText("速度").assertExists()
     }
 
@@ -105,8 +112,59 @@ class StatusScreenTest {
         composeRule.onNodeWithText("30 km/h").assertExists()
         composeRule.onNodeWithText("GPS Level").assertExists()
         val labels = statusRows(moving).map { it.first }
-        assertEquals(listOf("日付", "時刻", "緯度", "経度", "速度", "高度", "測位", "衛星", "精度"), labels)
+        assertEquals(
+            listOf(
+                "日付", "時刻", "緯度", "経度", "速度", "高度", "測位", "衛星",
+                "平均C/N0", "デュアル周波数", "水平精度(68%)", "95%目安×1.62", "垂直精度", "速度精度",
+            ),
+            labels,
+        )
         assertEquals("N 35°39'31\"", statusRows(moving)[2].second)
+    }
+
+    @Test
+    fun v05RowsShowAverageDualAndAccuracies() {
+        val state = fixState.copy(
+            position = PositionInfo(
+                35.6586, 139.7454, 4.2f, 42.0, 1795744748000L,
+                verticalAccuracyMeters = 6.5f, speedAccuracyMps = 0.5f,
+            ),
+            satellites = fixState.satellites +
+                // GPS 7 にも L5 を足して、L1+L5 が使用中の衛星を 2 機にする（デュアル周波数が点灯）
+                sat(GnssStatus.CONSTELLATION_GPS, 7, 90f, 0f, 28f, true, 1176.45e6f),
+        )
+        val rows = statusRows(state).toMap()
+        // 使用中 6 機（GPS 25=40, GPS 7=30, QZSS 195=45, GLONASS 4=33, Galileo 3=36）の平均。BeiDou は未使用
+        assertEquals("36.8 dB-Hz", rows["平均C/N0"])
+        assertEquals("点灯 2機", rows["デュアル周波数"])
+        assertEquals("±4.2 m", rows["水平精度(68%)"])
+        assertEquals("±6.8 m", rows["95%目安×1.62"])
+        assertEquals("±6.5 m", rows["垂直精度"])
+        assertEquals("±1.8 km/h", rows["速度精度"])
+        render(360.dp, 700.dp, state)
+        composeRule.onNodeWithText("36.8 dB-Hz").assertExists()
+        composeRule.onNodeWithText("点灯 2機").assertExists()
+        composeRule.onNodeWithTag(TAG_BAND_CHIPS).assertExists()
+        composeRule.onNodeWithTag(TAG_SPARKLINE).assertExists()
+        composeRule.onNodeWithTag(TAG_CONSTELLATION_STATS).assertExists()
+    }
+
+    @Test
+    fun dualFreqIsDashWhenNoFrequencyIsReported() {
+        val noFreq = fixState.copy(satellites = fixState.satellites.map { it.copy(carrierFrequencyHz = null) })
+        assertEquals("---", statusRows(noFreq).toMap()["デュアル周波数"])
+        // 平均 C/N0 は周波数が無くても出る
+        assertTrue(statusRows(noFreq).toMap()["平均C/N0"]!!.endsWith("dB-Hz"))
+        render(360.dp, 700.dp, noFreq)
+        composeRule.onNodeWithText("帯域 ---").assertExists()
+    }
+
+    @Test
+    fun constellationStatText() {
+        assertEquals("0/0 --", constellationStatText(null, large = false))
+        val stat = io.github.mashishiii.gnssmonitor.data.ConstellationStat(1, 6, 5, 32.46f)
+        assertEquals("5/6 32", constellationStatText(stat, large = false))
+        assertEquals("5/6 32.5", constellationStatText(stat, large = true))
     }
 
     @Test

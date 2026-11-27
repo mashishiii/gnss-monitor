@@ -83,6 +83,12 @@ class ThemeTest {
         for ((n, c) in listOf("強い" to NavColors.LevelStrong, "中" to NavColors.LevelMedium, "弱い" to NavColors.LevelWeak)) {
             check("$tag 球 $n on 文字盤中央", c, NavColors.DialCenter, 2.0)
         }
+        // v0.5: 内訳チップ（選択色 = デュアル周波数の点灯）・情報パネルの新しい行・スパークラインの線とラベル
+        check("$tag 点灯チップ 上", NavColors.OnButtonOn, NavColors.ButtonOnTop, 4.5)
+        check("$tag 点灯チップ 下", NavColors.OnButtonOn, NavColors.ButtonOnBottom, 4.5)
+        check("$tag スパークラインの線 on パネル", NavColors.TextPrimary, NavColors.PanelBottom, 6.5)
+        check("$tag スパークラインのラベル on パネル", NavColors.TextSecondary, NavColors.PanelTop, 4.5)
+        check("$tag 地図の凡例・状態ボックスの補助文字", NavColors.TextSecondary, NavColors.OverlayBg.copy(alpha = 1f), 4.5)
         // 文字盤の上の「N」
         check("$tag N on 背景", NavColors.TextPrimary, NavColors.Background, 6.5)
     }

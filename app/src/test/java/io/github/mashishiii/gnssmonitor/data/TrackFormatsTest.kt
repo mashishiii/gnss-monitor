@@ -26,10 +26,10 @@ class TrackFormatsTest {
         val lines = sb.toString().split("\r\n").filter { it.isNotEmpty() }
         assertEquals(TrackFormats.CSV_HEADER, lines[0])
         assertEquals(4, lines.size)
-        assertEquals("2026-11-27T01:59:08.250Z,35.6812360,139.7671250,42.3,4.2,1.25,9,14", lines[1])
-        // 値が無い項目は空欄
-        assertEquals("2026-11-27T01:59:09.250Z,35.6813000,139.7672000,,,,3,6", lines[2])
-        assertEquals("2026-11-27T01:59:10.250Z,-33.8500000,-151.2000000,-2.0,12.5,0.00,0,2", lines[3])
+        // 先頭 8 列は v0.3 から同じ。v0.5 の 8 列が後ろに付く（値が無い項目は空欄）
+        assertEquals("2026-11-27T01:59:08.250Z,35.6812360,139.7671250,42.3,4.2,1.25,9,14,,,,,,,,", lines[1])
+        assertEquals("2026-11-27T01:59:09.250Z,35.6813000,139.7672000,,,,3,6,,,,,,,,", lines[2])
+        assertEquals("2026-11-27T01:59:10.250Z,-33.8500000,-151.2000000,-2.0,12.5,0.00,0,2,,,,,,,,", lines[3])
     }
 
     @Test
@@ -111,5 +111,111 @@ class TrackFormatsTest {
     @Test
     fun defaultFileNameUsesLocalTime() {
         assertEquals("gnss-track-20261127-1059", TrackFormats.defaultFileBase(t0, TimeZone.getTimeZone("Asia/Tokyo")))
+    }
+
+    private val v05 = LogPoint(
+        t0, 35.6812360, 139.7671250, 42.3, 4.2f, 1.25f, 9, 14,
+        verticalAccuracyMeters = 6.5f,
+        speedAccuracyMps = 0.35f,
+        avgCn0DbHz = 31.4f,
+        dualFreq = true,
+        dualFreqSats = 3,
+        satsL1 = 8,
+        satsL5 = 5,
+        satsOtherBands = mapOf(BandFamily.L2 to 2, BandFamily.E5B to 1),
+    )
+
+    @Test
+    fun csvHeaderHasEightNewColumnsAfterTheOriginalEight() {
+        val cols = TrackFormats.CSV_HEADER.split(",")
+        assertEquals(16, cols.size)
+        assertEquals(
+            listOf("time_utc", "latitude", "longitude", "altitude_m", "accuracy_m", "speed_mps", "satellites_used", "satellites_visible"),
+            cols.take(8),
+        )
+        assertEquals(
+            listOf("vertical_accuracy_m", "speed_accuracy_mps", "avg_cn0_dbhz", "dual_freq", "dual_freq_sats", "sats_l1", "sats_l5", "sats_other_bands"),
+            cols.drop(8),
+        )
+    }
+
+    @Test
+    fun csvWritesAndReadsBackNewColumns() {
+        val sb = StringBuilder()
+        TrackFormats.writeCsv(listOf(v05), sb)
+        val line = sb.toString().split("\r\n")[1]
+        assertEquals("2026-11-27T01:59:08.250Z,35.6812360,139.7671250,42.3,4.2,1.25,9,14,6.5,0.35,31.4,1,3,8,5,E5b:1;L2:2", line)
+        val back = TrackFormats.parseCsv(sb.toString()).single()
+        assertEquals(6.5f, back.verticalAccuracyMeters!!, 0.01f)
+        assertEquals(0.35f, back.speedAccuracyMps!!, 0.001f)
+        assertEquals(31.4f, back.avgCn0DbHz!!, 0.01f)
+        assertEquals(true, back.dualFreq)
+        assertEquals(3, back.dualFreqSats)
+        assertEquals(8, back.satsL1)
+        assertEquals(5, back.satsL5)
+        assertEquals(mapOf(BandFamily.L2 to 2, BandFamily.E5B to 1), back.satsOtherBands)
+    }
+
+    @Test
+    fun csvWithoutFrequencyInfoLeavesDualFreqBlank() {
+        val p = v05.copy(dualFreq = null, dualFreqSats = null, satsL1 = null, satsL5 = null, satsOtherBands = emptyMap())
+        val back = TrackFormats.parseCsv(StringBuilder().also { TrackFormats.writeCsv(listOf(p), it) }.toString()).single()
+        assertEquals(null, back.dualFreq)
+        assertEquals(null, back.satsL5)
+        assertEquals(6.5f, back.verticalAccuracyMeters!!, 0.01f)
+    }
+
+    @Test
+    fun oldEightColumnCsvStillReads() {
+        val old = "time_utc,latitude,longitude,altitude_m,accuracy_m,speed_mps,satellites_used,satellites_visible\r\n" +
+            "2026-11-27T01:59:08.250Z,35.6812360,139.7671250,42.3,4.2,1.25,9,14\r\n"
+        val p = TrackFormats.parseCsv(old).single()
+        assertEquals(35.6812360, p.latitude, 1e-7)
+        assertEquals(9, p.satellitesUsed)
+        assertEquals(null, p.verticalAccuracyMeters)
+        assertEquals(null, p.dualFreq)
+        assertTrue(p.satsOtherBands.isEmpty())
+    }
+
+    @Test
+    fun gpxCarriesNewExtensions() {
+        val sb = StringBuilder()
+        TrackFormats.writeGpx(listOf(v05), sb, "x")
+        val doc = parseGpx(sb.toString())
+        fun ext(name: String) = doc.getElementsByTagNameNS(TrackFormats.GPX_EXT_NS, name).item(0)?.textContent
+        assertEquals("6.5", ext("verticalAccuracy"))
+        assertEquals("0.35", ext("speedAccuracy"))
+        assertEquals("31.4", ext("avgCn0"))
+        assertEquals("1", ext("dualFreq"))
+        assertEquals("3", ext("dualFreqSats"))
+        assertEquals("8", ext("satsL1"))
+        assertEquals("5", ext("satsL5"))
+        assertEquals("E5b:1;L2:2", ext("satsOtherBands"))
+        // 値が無い点には出さない
+        val none = StringBuilder().also { TrackFormats.writeGpx(listOf(points[0]), it, "x") }.toString()
+        assertFalse(none.contains("verticalAccuracy"))
+        assertFalse(none.contains("dualFreq"))
+    }
+
+    @Test
+    fun logPointFromStateFillsV05Fields() {
+        fun s(c: Int, svid: Int, hz: Float, used: Boolean, cn0: Float) = SatelliteInfo(c, svid, cn0, 0f, 45f, used, hz)
+        val state = GnssUiState(
+            position = PositionInfo(35.0, 139.0, 3f, 10.0, t0, verticalAccuracyMeters = 5f, speedAccuracyMps = 0.2f),
+            satellites = listOf(
+                s(1, 3, 1575.42e6f, true, 40f), s(1, 3, 1176.45e6f, true, 30f),
+                s(1, 4, 1575.42e6f, true, 36f), s(1, 4, 1176.45e6f, true, 32f),
+                s(1, 9, 1575.42e6f, true, 28f), s(1, 9, 1227.6e6f, true, 25f),
+            ),
+        )
+        val p = logPointFrom(state)!!
+        assertEquals(5f, p.verticalAccuracyMeters!!, 0f)
+        assertEquals(true, p.dualFreq)
+        assertEquals(2, p.dualFreqSats)
+        assertEquals(3, p.satsL1)
+        assertEquals(2, p.satsL5)
+        assertEquals(mapOf(BandFamily.L2 to 1), p.satsOtherBands)
+        // 平均 C/N0 は衛星ごとに強い方（40, 36, 28）
+        assertEquals((40f + 36f + 28f) / 3f, p.avgCn0DbHz!!, 0.01f)
     }
 }

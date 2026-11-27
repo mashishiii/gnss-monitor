@@ -2,8 +2,14 @@ package io.github.mashishiii.gnssmonitor.ui.list
 
 import android.location.GnssStatus
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import io.github.mashishiii.gnssmonitor.data.SatelliteInfo
+import io.github.mashishiii.gnssmonitor.data.computeGnssStats
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import io.github.mashishiii.gnssmonitor.ui.theme.GnssMonitorTheme
 import org.junit.Rule
 import org.junit.Test
@@ -57,5 +63,33 @@ class SatelliteListTest {
             ),
         )
         composeRule.onNodeWithText("測位系").assertExists()
+    }
+
+    @Test
+    fun rowsUseDisplayNamesAndMarkDualFrequencySatellites() {
+        val gal = GnssStatus.CONSTELLATION_GALILEO
+        val list = listOf(
+            sat(1, 1575.42e6f, gal), sat(1, 1176.45e6f, gal),
+            sat(2, 1575.42e6f, gal), sat(2, 1176.45e6f, gal),
+            sat(7, 1575.42e6f),
+        )
+        render(list)
+        composeRule.onAllNodesWithText("E5a ◆", substring = false).assertCountEquals(2)
+        composeRule.onAllNodesWithText("E1 ◆", substring = false).assertCountEquals(2)
+        composeRule.onNodeWithText("L1").assertExists()
+        val stats = computeGnssStats(list)
+        assertTrue(isDualRow(list[0], stats))
+        assertTrue(isDualRow(list[1], stats))
+        assertFalse(isDualRow(list[4], stats))
+    }
+
+    @Test
+    fun headerSummariesShowBandsAndConstellations() {
+        val list = listOf(sat(3, 1575.42e6f, cn0 = 40f), sat(3, 1176.45e6f, cn0 = 30f), sat(4, 1575.42e6f, cn0 = 30f, used = false))
+        val stats = computeGnssStats(list)
+        assertEquals("L1 1/2  L5 1/1", bandSummary(stats))
+        assertEquals("G 1/2 40.0", constellationSummary(stats).replace('\u00A0', ' '))
+        assertEquals("---", bandSummary(computeGnssStats(listOf(sat(3)))))
+        assertEquals("---", constellationSummary(computeGnssStats(emptyList())))
     }
 }

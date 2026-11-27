@@ -40,5 +40,11 @@ class SatelliteSafetyTest {
         assertEquals("L2", bandLabel(1227.6e6f))
         assertEquals("", bandLabel(null))
         assertEquals("", bandLabel(Float.NaN))
+        // v0.5: 周波数だけのときは帯域族の名前。E5b は L2 に紛れない
+        assertEquals("E5b", bandLabel(1207.14e6f))
+        assertEquals("G2", bandLabel(1246.0e6f))
+        assertEquals("B3", bandLabel(1268.52e6f))
+        assertEquals("E6", bandLabel(1278.75e6f))
+        assertEquals("-", bandLabel(900e6f))
     }
 }

@@ -43,6 +43,8 @@ class GnssRepository(context: Context) {
     private var latestPosition: PositionInfo? = null
     private var latestPositionAtMs = 0L
     private var latestSatellites: List<SatelliteInfo> = emptyList()
+    // 水平精度の履歴（アプリのメモリ上だけ。GNSS を止めたら捨てる）
+    private var accuracyHistory: List<Float?> = emptyList()
     private var started = false
     private var tickerJob: Job? = null
 
@@ -60,6 +62,17 @@ class GnssRepository(context: Context) {
                     timeMillis = location.time.takeIf { it > 0L },
                     speedMps = if (location.hasSpeed()) location.speed.takeIf { it.isFinite() && it >= 0f } else null,
                     bearingDegrees = if (location.hasBearing()) location.bearing.takeIf { it.isFinite() } else null,
+                    // 垂直精度・速度精度は Android 8（API 26）以上で、端末が返したときだけ
+                    verticalAccuracyMeters = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasVerticalAccuracy()) {
+                        location.verticalAccuracyMeters.takeIf { it.isFinite() && it >= 0f }
+                    } else {
+                        null
+                    },
+                    speedAccuracyMps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasSpeedAccuracy()) {
+                        location.speedAccuracyMetersPerSecond.takeIf { it.isFinite() && it >= 0f }
+                    } else {
+                        null
+                    },
                 )
                 latestPositionAtMs = SystemClock.elapsedRealtime()
             }
@@ -159,6 +172,7 @@ class GnssRepository(context: Context) {
         started = false
         tickerJob?.cancel()
         tickerJob = null
+        accuracyHistory = emptyList()
         runCatching { locationManager.removeUpdates(locationListener) }
         runCatching { locationManager.unregisterGnssStatusCallback(gnssCallback) }
     }
@@ -166,14 +180,17 @@ class GnssRepository(context: Context) {
     private fun publish() {
         val gpsEnabled = runCatching { locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) }
             .getOrDefault(false)
-        _state.value = GnssUiState(
-            gpsEnabled = gpsEnabled,
-            // 10 秒以上位置が更新されていなければ「測位なし」として扱う（古い値を出し続けない）
-            position = latestPosition?.takeIf {
-                SystemClock.elapsedRealtime() - latestPositionAtMs <= POSITION_STALE_MS
-            },
-            satellites = latestSatellites,
+        // 10 秒以上位置が更新されていなければ「測位なし」として扱う（古い値を出し続けない）
+        val position = latestPosition?.takeIf {
+            SystemClock.elapsedRealtime() - latestPositionAtMs <= POSITION_STALE_MS
+        }
+        val snapshot = GnssUiState(gpsEnabled = gpsEnabled, position = position, satellites = latestSatellites)
+        // 測位できているときだけ精度を履歴に足す（未測位の秒は null = 線が切れる）
+        accuracyHistory = appendAccuracy(
+            accuracyHistory,
+            position?.accuracyMeters?.takeIf { snapshot.fixState != FixState.NO_FIX },
         )
+        _state.value = snapshot.copy(accuracyHistory = accuracyHistory)
     }
 
     private companion object {

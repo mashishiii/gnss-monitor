@@ -59,6 +59,15 @@ import io.github.mashishiii.gnssmonitor.data.formatDmsNav
 import io.github.mashishiii.gnssmonitor.data.formatSpeedKmh
 import io.github.mashishiii.gnssmonitor.data.formatTimeNav
 import io.github.mashishiii.gnssmonitor.ui.theme.darken
+import io.github.mashishiii.gnssmonitor.data.BandFamily
+import io.github.mashishiii.gnssmonitor.data.GnssStats
+import io.github.mashishiii.gnssmonitor.data.computeGnssStats
+import io.github.mashishiii.gnssmonitor.data.dualFreqLabel
+import io.github.mashishiii.gnssmonitor.data.formatSpeedAccuracyKmh
+import io.github.mashishiii.gnssmonitor.data.formatVerticalAccuracy
+import io.github.mashishiii.gnssmonitor.data.horizontalAccuracy95
+import io.github.mashishiii.gnssmonitor.data.ACCURACY_95_FACTOR
+import android.location.GnssStatus
 import io.github.mashishiii.gnssmonitor.data.mergeSatellites
 import io.github.mashishiii.gnssmonitor.ui.theme.NavColors
 import io.github.mashishiii.gnssmonitor.ui.theme.constellationColor
@@ -74,6 +83,9 @@ internal const val TAG_SKY_PLOT = "skyPlot"
 internal const val TAG_SIGNAL_BARS = "signalBars"
 internal const val TAG_LEVEL_PANEL = "levelPanel"
 internal const val TAG_INFO_PANEL = "infoPanel"
+internal const val TAG_BAND_CHIPS = "bandChips"
+internal const val TAG_SPARKLINE = "accuracySparkline"
+internal const val TAG_CONSTELLATION_STATS = "constellationStats"
 
 /** 左の「GPS Level」パネルの幅（縦長・横長とも）。 */
 private val LevelPanelWidthNarrow = 96.dp
@@ -89,12 +101,13 @@ fun StatusScreen(
 ) {
     val sats = remember(state.satellites) { mergeSatellites(state.satellites) }
     val selected = sats.firstOrNull { it.key == selectedKey }
+    val stats = remember(state.satellites) { computeGnssStats(state.satellites) }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         if (maxWidth >= WideThreshold) {
-            WideLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
+            WideLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight)
         } else {
-            NarrowLayout(state, sats, selected, onSelect, maxWidth, maxHeight)
+            NarrowLayout(state, stats, sats, selected, onSelect, maxWidth, maxHeight)
         }
     }
 }
@@ -103,7 +116,7 @@ fun StatusScreen(
  * 縦長画面でスカイプロット以外（詳細・強度バー・情報パネル）に必要な高さの目安。
  * 残りが [NarrowMinSky] 以上あれば、スクロールなしで全部が見えるようにスカイプロットを縮める。
  */
-private val NarrowReservedHeight = 344.dp
+private val NarrowReservedHeight = 396.dp
 private val NarrowMinSky = 200.dp
 
 /** スクロールなしで収める配置にできるか。 */
@@ -112,6 +125,7 @@ internal fun narrowFitsWithoutScroll(maxHeight: Dp): Boolean = maxHeight - Narro
 @Composable
 private fun NarrowLayout(
     state: GnssUiState,
+    stats: GnssStats,
     sats: List<MergedSatellite>,
     selected: MergedSatellite?,
     onSelect: (String?) -> Unit,
@@ -131,8 +145,9 @@ private fun NarrowLayout(
                 }
             }
             Readout(selected)
-            SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
-            InfoPanel(state, twoColumns = true)
+            SignalBars(sats, selected?.key, onSelect, barHeight = 88.dp)
+            BreakdownRow(stats, state.accuracyHistory)
+            InfoPanel(state, stats, twoColumns = true)
         }
     } else {
         // 高さが足りない（横向きのスマホなど）ときはスクロール
@@ -148,18 +163,20 @@ private fun NarrowLayout(
                 }
             }
             Readout(selected)
-            SignalBars(sats, selected?.key, onSelect, barHeight = 96.dp)
-            InfoPanel(state, twoColumns = true)
+            SignalBars(sats, selected?.key, onSelect, barHeight = 88.dp)
+            BreakdownRow(stats, state.accuracyHistory)
+            InfoPanel(state, stats, twoColumns = true)
         }
     }
 }
 
 /** 広い画面で、受信強度バーと詳細に確保する高さの目安。 */
-private val WideBottomHeight = 166.dp
+private val WideBottomHeight = 176.dp
 
 @Composable
 private fun WideLayout(
     state: GnssUiState,
+    stats: GnssStats,
     sats: List<MergedSatellite>,
     selected: MergedSatellite?,
     onSelect: (String?) -> Unit,
@@ -178,10 +195,20 @@ private fun WideLayout(
             Box(Modifier.width(skySize).fillMaxHeight(), contentAlignment = Alignment.Center) {
                 SkyPlot(sats, selected?.key, onSelect, Modifier.size(skySize).testTag(TAG_SKY_PLOT))
             }
-            InfoPanel(state, twoColumns = false, modifier = Modifier.weight(1f).fillMaxHeight())
+            InfoPanel(state, stats, twoColumns = false, modifier = Modifier.weight(1f).fillMaxHeight())
         }
-        Readout(selected)
-        SignalBars(sats, selected?.key, onSelect, barHeight = 90.dp)
+        // 下段: 左に詳細と受信強度バー、右に帯域の内訳と精度の履歴
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Readout(selected)
+                SignalBars(sats, selected?.key, onSelect, barHeight = 90.dp)
+            }
+            Column(Modifier.width(380.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                BandChips(stats, Modifier.fillMaxWidth().weight(1f), maxLines = 3)
+                ConstellationStats(stats, Modifier.fillMaxWidth(), large = true)
+                AccuracySparkline(state.accuracyHistory, Modifier.fillMaxWidth().height(56.dp))
+            }
+        }
     }
     if (fits) {
         Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { body() }
@@ -510,16 +537,157 @@ internal fun SignalBars(
     }
 }
 
+/** 測位系ごとの「使用/捕捉 平均C/N0」。例: 5/6 32。狭い画面では C/N0 を整数にして幅を節約。 */
+internal fun constellationStatText(stat: io.github.mashishiii.gnssmonitor.data.ConstellationStat?, large: Boolean): String {
+    val used = stat?.used ?: 0
+    val cap = stat?.captured ?: 0
+    val avg = stat?.avgCn0DbHz?.let { if (large) String.format(Locale.US, "%.1f", it) else String.format(Locale.US, "%.0f", it) } ?: "--"
+    return "$used/$cap $avg"
+}
+
+/** 凡例と同じ頭文字の丸 + 測位系ごとの貢献（使用/捕捉 と使用中の衛星の平均 C/N0）。 */
+@Composable
+private fun ConstellationStats(stats: GnssStats, modifier: Modifier = Modifier, large: Boolean = false) {
+    val measurer = rememberTextMeasurer()
+    val items = listOf(
+        Triple("G", GnssStatus.CONSTELLATION_GPS, NavColors.Gps),
+        Triple("J", GnssStatus.CONSTELLATION_QZSS, NavColors.Qzss),
+        Triple("R", GnssStatus.CONSTELLATION_GLONASS, NavColors.Glonass),
+        Triple("E", GnssStatus.CONSTELLATION_GALILEO, NavColors.Galileo),
+        Triple("C", GnssStatus.CONSTELLATION_BEIDOU, NavColors.BeiDou),
+    )
+    Row(
+        modifier.testTag(TAG_CONSTELLATION_STATS),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for ((letter, type, color) in items) {
+            val stat = stats.constellations.firstOrNull { it.constellationType == type }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                Canvas(Modifier.size(if (large) 14.dp else 12.dp)) {
+                    drawBadge(measurer, letter, Offset(size.width / 2f, size.height / 2f), size.minDimension / 2f, color)
+                }
+                Text(
+                    constellationStatText(stat, large),
+                    color = if (stat != null && stat.used > 0) NavColors.TextPrimary else NavColors.TextSecondary,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = if (large) 10.sp else 9.sp,
+                    lineHeight = if (large) 12.sp else 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- 帯域の内訳と精度の履歴
+
+private fun bandChipTexts(stats: GnssStats): List<Pair<String, Boolean>> {
+    if (!stats.hasFrequencyInfo) return listOf("帯域 ---" to false)
+    val chips = stats.bands.map { b ->
+        val name = if (b.family == BandFamily.UNKNOWN) "?" else b.family.label
+        "$name ${b.used}/${b.captured}" to false
+    }
+    return chips + ("デュアル ${stats.dualFreqSatellites}" to stats.dualFreq)
+}
+
+/** 帯域ごとの「使用/捕捉」と、デュアル周波数の点灯。点灯中のチップはえんじ色。 */
+@Composable
+private fun BandChips(stats: GnssStats, modifier: Modifier = Modifier, maxLines: Int = 2) {
+    FlowRow(
+        modifier.testTag(TAG_BAND_CHIPS),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        maxLines = maxLines,
+    ) {
+        for ((text, lit) in bandChipTexts(stats)) {
+            Text(
+                text,
+                color = if (lit) NavColors.OnButtonOn else NavColors.TextPrimary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .then(
+                        if (lit) {
+                            Modifier.background(
+                                Brush.verticalGradient(listOf(NavColors.ButtonOnTop, NavColors.ButtonOnBottom)),
+                                RoundedCornerShape(6.dp),
+                            )
+                        } else {
+                            Modifier.panelSurface(RoundedCornerShape(6.dp))
+                        },
+                    )
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/** 直近 60 秒の水平精度 (68%) の細い折れ線。値の無い秒は線を切る。 */
+@Composable
+private fun AccuracySparkline(history: List<Float?>, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    val maxValue = sparklineMax(history)
+    val line = NavColors.TextPrimary
+    val grid = NavColors.GridLine
+    Canvas(
+        modifier
+            .testTag(TAG_SPARKLINE)
+            .panelSurface(RoundedCornerShape(8.dp)),
+    ) {
+        val padX = 6.dp.toPx()
+        val top = 12.dp.toPx()
+        val bottom = 4.dp.toPx()
+        val w = size.width - padX * 2
+        val h = size.height - top - bottom
+        if (w <= 0f || h <= 0f) return@Canvas
+        val tiny = TextStyle(color = NavColors.TextSecondary, fontSize = 8.sp, fontFamily = FontFamily.Monospace)
+        drawLine(grid, Offset(padX, top + h), Offset(padX + w, top + h), 1.dp.toPx())
+        drawLine(grid, Offset(padX, top), Offset(padX + w, top), 1.dp.toPx())
+        drawText(measurer.measure("精度(68%) 60秒", tiny), topLeft = Offset(padX, 0f))
+        val maxText = measurer.measure(String.format(Locale.US, "%.0fm", maxValue), tiny)
+        drawText(maxText, topLeft = Offset(size.width - padX - maxText.size.width, 0f))
+        for (seg in sparklineSegments(history, w, h, maxValue)) {
+            if (seg.size == 1) {
+                drawCircle(line, 1.5.dp.toPx(), Offset(padX + seg[0].x, top + seg[0].y))
+            } else {
+                val path = Path().apply {
+                    seg.forEachIndexed { i, pt ->
+                        if (i == 0) moveTo(padX + pt.x, top + pt.y) else lineTo(padX + pt.x, top + pt.y)
+                    }
+                }
+                drawPath(path, line, style = Stroke(1.5.dp.toPx()))
+            }
+        }
+    }
+}
+
+/** 縦長画面の下段: 左に帯域チップ、右に精度の履歴、その下に測位系ごとの貢献を 1 行。 */
+@Composable
+private fun BreakdownRow(stats: GnssStats, history: List<Float?>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            BandChips(stats, Modifier.weight(1f).fillMaxHeight())
+            AccuracySparkline(history, Modifier.width(132.dp).fillMaxHeight())
+        }
+        ConstellationStats(stats, Modifier.fillMaxWidth())
+    }
+}
+
 // ---------------------------------------------------------------- 情報パネル
 
 /**
- * 情報パネルの行（ラベルと値）。nav-u の並び: 日付・時刻・緯度・経度・速度・高度・測位。
- * 続けて、このアプリで足した衛星数（使用 / 捕捉）と水平精度。
- * 測位できていないときの値は nav-u のように「---」。
+ * 情報パネルの行（ラベルと値）。nav-u の並び（日付・時刻・緯度・経度・速度・高度・測位）に続けて、
+ * このアプリの項目: 衛星数、使用衛星の平均 C/N0、デュアル周波数、水平精度 (68%) と 95% の目安、垂直精度、速度精度。
+ * 値が取れないときは nav-u のように「---」。先頭の 7 行と後ろの 7 行で、縦長の 2 列表示の左右になる。
  */
-internal fun statusRows(state: GnssUiState): List<Pair<String, String>> {
+internal fun statusRows(state: GnssUiState, stats: GnssStats = computeGnssStats(state.satellites)): List<Pair<String, String>> {
     val hasFix = state.fixState != FixState.NO_FIX
     val p = state.position.takeIf { hasFix }
+    val acc68 = p?.accuracyMeters
     return listOf(
         "日付" to (p?.timeMillis?.let { formatDateNav(it) } ?: "---"),
         "時刻" to (p?.timeMillis?.let { formatTimeNav(it) } ?: "---"),
@@ -529,14 +697,20 @@ internal fun statusRows(state: GnssUiState): List<Pair<String, String>> {
         "高度" to (p?.altitudeMeters?.let { String.format(Locale.US, "%.0f m", it) } ?: "---"),
         "測位" to state.fixState.label,
         "衛星" to "${state.usedCount} / ${state.capturedCount}",
-        "精度" to (p?.accuracyMeters?.let { String.format(Locale.US, "±%.1f m", it) } ?: "---"),
+        "平均C/N0" to (stats.avgCn0DbHz?.let { String.format(Locale.US, "%.1f dB-Hz", it) } ?: "---"),
+        "デュアル周波数" to stats.dualFreqLabel(),
+        "水平精度(68%)" to (acc68?.let { String.format(Locale.US, "±%.1f m", it) } ?: "---"),
+        "95%目安×" + ACCURACY_95_FACTOR.toString().removeSuffix("0") to
+            (horizontalAccuracy95(acc68)?.let { String.format(Locale.US, "±%.1f m", it) } ?: "---"),
+        "垂直精度" to formatVerticalAccuracy(p?.verticalAccuracyMeters),
+        "速度精度" to formatSpeedAccuracyKmh(p?.speedAccuracyMps),
     )
 }
 
 /** 右の情報パネル。大きな白い等幅の文字（液晶風）で、値は右寄せ。縦長では 2 列にして高さを抑える。 */
 @Composable
-private fun InfoPanel(state: GnssUiState, twoColumns: Boolean, modifier: Modifier = Modifier) {
-    val rows = statusRows(state)
+private fun InfoPanel(state: GnssUiState, stats: GnssStats, twoColumns: Boolean, modifier: Modifier = Modifier) {
+    val rows = statusRows(state, stats)
     Box(
         modifier
             .testTag(TAG_INFO_PANEL)
@@ -546,31 +720,35 @@ private fun InfoPanel(state: GnssUiState, twoColumns: Boolean, modifier: Modifie
     ) {
         if (twoColumns) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    rows.take(5).forEach { (l, v) -> InfoRow(l, v, labelWidth = 32.dp, valueSize = 13.sp, labelSize = 11.sp) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    rows.take(7).forEach { (l, v) -> InfoRow(l, v, valueSize = 12.sp, labelSize = 10.sp) }
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    rows.drop(5).forEach { (l, v) -> InfoRow(l, v, labelWidth = 32.dp, valueSize = 13.sp, labelSize = 11.sp) }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    rows.drop(7).forEach { (l, v) -> InfoRow(l, v, valueSize = 12.sp, labelSize = 10.sp) }
                 }
             }
         } else {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.SpaceEvenly) {
-                rows.forEach { (l, v) -> InfoRow(l, v, labelWidth = 48.dp, valueSize = 19.sp, labelSize = 14.sp) }
+                rows.forEach { (l, v) -> InfoRow(l, v, valueSize = 15.sp, labelSize = 12.sp) }
             }
         }
     }
 }
 
 @Composable
-private fun InfoRow(label: String, value: String, labelWidth: Dp, valueSize: androidx.compose.ui.unit.TextUnit, labelSize: androidx.compose.ui.unit.TextUnit) {
+private fun InfoRow(label: String, value: String, valueSize: androidx.compose.ui.unit.TextUnit, labelSize: androidx.compose.ui.unit.TextUnit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = NavColors.TextPrimary, fontSize = labelSize, maxLines = 1, modifier = Modifier.width(labelWidth))
+        Text(
+            label, color = NavColors.TextPrimary, fontSize = labelSize, lineHeight = labelSize * 1.25f,
+            maxLines = 1, softWrap = false, modifier = Modifier.padding(end = 6.dp),
+        )
         Text(
             value,
             color = NavColors.TextPrimary,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             fontSize = valueSize,
+            lineHeight = valueSize * 1.2f,
             textAlign = androidx.compose.ui.text.style.TextAlign.End,
             maxLines = 1,
             softWrap = false,
